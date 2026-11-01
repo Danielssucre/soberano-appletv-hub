@@ -11819,10 +11819,13 @@
 
             // SOBERANO SPECULATIVE PRE-WARMING (Instant-Start < 200ms)
             // Pre-calienta en la RAM del Mac M3 el manifiesto, llaves y primer segmento mientras el usuario lee
+            const preTitle = encodeURIComponent(item.title || item.name || '');
+            const preOrigTitle = encodeURIComponent(item.original_title || item.original_name || '');
+            const preLang = encodeURIComponent(item.original_language || 'en');
             if (mediaType === 'movie') {
-                fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=movie`).catch(() => {});
+                fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=movie&orig_lang=${preLang}&title=${preTitle}&orig_title=${preOrigTitle}`).catch(() => {});
             } else {
-                fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=tv&s=1&e=1`).catch(() => {});
+                fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=tv&s=1&e=1&orig_lang=${preLang}`).catch(() => {});
             }
             
             const overlay = document.getElementById('sheetOverlay');
@@ -12176,7 +12179,9 @@
                 availableSpanishSubs = [];
                 currentSpanishSubIndex = 0;
                 if (PROXY_BASE) {
-                    const resResp = await fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=${type}&s=${s}&e=${e}&orig_lang=${encodeURIComponent(item.original_language || 'en')}`);
+                    const qTitle = encodeURIComponent(item.title || item.name || '');
+                    const qOrigTitle = encodeURIComponent(item.original_title || item.original_name || '');
+                    const resResp = await fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=${type}&s=${s}&e=${e}&orig_lang=${encodeURIComponent(item.original_language || 'en')}&title=${qTitle}&orig_title=${qOrigTitle}`);
                     if (resResp.ok) {
                         const resData = await resResp.json();
                         resolvedDataObj = resData;
