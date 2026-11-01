@@ -1,0 +1,13 @@
+{
+  "id": "com.soberano.appletvhub.service",
+  "description": "Soberano Hub On-Device Streaming Engine",
+  "services": [
+    {
+      "name": "com.soberano.appletvhub.service"
+    }
+  ],
+  "requiredACG": [
+    "network.query",
+    "application.launcher"
+  ]
+}

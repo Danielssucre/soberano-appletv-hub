@@ -1,0 +1,12 @@
+node_modules/
+*.log
+*.tmp
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.ipk
+aligned/
+logs/
+tmp/
+subtitles/
