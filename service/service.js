@@ -705,180 +705,377 @@ function unpackPackedJS(packedStr) {
     return p;
 }
 
-async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expectedOrigTitle, origLang = 'en') {
+function rot13(str) {
+    return str.replace(/[a-zA-Z]/g, function(c) {
+        var base = c <= 'Z' ? 65 : 97;
+        return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+    });
+}
+
+function decodeVoeJson(rawJson) {
     try {
-        let titles = [expectedTitle, expectedOrigTitle].filter(Boolean);
-        let yearTarget = null;
-        if (titles.length === 0 || !yearTarget) {
-            try {
-                const tmdbRes = await proxyTmdbRequest(type === 'tv' ? `tv/${id}` : `movie/${id}`, 'language=es-MX');
-                const tmdbJson = JSON.parse(tmdbRes.body);
-                if (tmdbJson.title) titles.push(tmdbJson.title);
-                if (tmdbJson.name) titles.push(tmdbJson.name);
-                if (tmdbJson.original_title) titles.push(tmdbJson.original_title);
-                if (tmdbJson.original_name) titles.push(tmdbJson.original_name);
-                if (tmdbJson.original_language) origLang = tmdbJson.original_language;
-                const dateStr = tmdbJson.release_date || tmdbJson.first_air_date || '';
-                if (dateStr) yearTarget = dateStr.slice(0, 4);
-            } catch(e) {}
+        var arr = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+        var obf = arr[0];
+        var s1 = rot13(obf);
+        var pats = ['@$', '^^', '~@', '%?', '*~', '!!', '#&'];
+        for (var i = 0; i < pats.length; i++) {
+            s1 = s1.split(pats[i]).join('');
         }
-        titles = Array.from(new Set(titles.filter(Boolean)));
-        if (titles.length === 0) return null;
+        var s2 = Buffer.from(s1, 'base64').toString('utf8');
+        var s3 = '';
+        for (var j = 0; j < s2.length; j++) {
+            s3 += String.fromCharCode(s2.charCodeAt(j) - 3);
+        }
+        var s4 = s3.split('').reverse().join('');
+        var s5 = Buffer.from(s4, 'base64').toString('utf8');
+        try {
+            return JSON.parse(s5);
+        } catch(e) {
+            return s5;
+        }
+    } catch(err) {
+        return null;
+    }
+}
 
-        console.log(`[CUEVANA] Buscando stream para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget);
+async function resolveVoeStream(voeUrl) {
+    try {
+        var pageHtml = await fetchText(voeUrl, { 'Referer': 'https://ver.gnula.one/' }, 5000);
+        var jsRedirect = pageHtml.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/);
+        if (jsRedirect) {
+            pageHtml = await fetchText(jsRedirect[1], { 'Referer': 'https://ver.gnula.one/' }, 5000);
+        }
 
-        let matchedPageUrl = null;
-        let matchedSlug = null;
-
-        for (const titleQuery of titles) {
-            const cleanQuery = titleQuery.replace(/[:\-–—]/g, ' ').trim();
-            const searchUrl = `https://cuevana3c.pro/explorar?s=${encodeURIComponent(cleanQuery)}`;
-            const searchHtml = await fetchText(searchUrl, { 'Referer': 'https://cuevana3c.pro/' }, 5000);
-            
-            const cardRegex = /<div class="movie-item">\s*<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/div>/g;
-            let m;
-            const candidates = [];
-            while ((m = cardRegex.exec(searchHtml)) !== null) {
-                const link = m[1];
-                const inner = m[2];
-                const isTypeMatch = type === 'tv' ? link.includes('/serie/') : link.includes('/pelicula/');
-                if (!isTypeMatch) continue;
-                
-                const titleM = inner.match(/<p>([^<]+)<\/p>/);
-                const yearM = inner.match(/<span class="year[^"]*">([^<]+)<\/span>/);
-                const itemTitle = titleM ? titleM[1].trim() : '';
-                const itemYear = yearM ? yearM[1].trim() : '';
-                
-                candidates.push({ link, itemTitle, itemYear });
+        var jsonScriptMatch = pageHtml.match(/<script type="application\/json">\s*(\[[\s\S]*?\])\s*<\/script>/);
+        if (jsonScriptMatch) {
+            var voeData = decodeVoeJson(jsonScriptMatch[1]);
+            if (voeData && typeof voeData === 'object') {
+                if (voeData.source) return voeData.source;
+                if (voeData.direct_access_url) return voeData.direct_access_url;
+                if (Array.isArray(voeData.fallback) && voeData.fallback[0] && voeData.fallback[0].file) {
+                    return voeData.fallback[0].file;
+                }
+            } else if (typeof voeData === 'string') {
+                var m3u8Match = voeData.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/);
+                if (m3u8Match) return m3u8Match[0];
             }
+        }
+        return null;
+    } catch(e) {
+        return null;
+    }
+}
 
-            if (candidates.length > 0) {
-                let best = null;
-                if (yearTarget && type === 'movie') {
-                    best = candidates.find(c => c.itemYear && c.itemYear.includes(yearTarget));
+async function resolveGnulaStreams(id, type, s, e, titles, yearTarget, origLang) {
+    var results = [];
+    var isTv = type === 'tv';
+
+    for (var i = 0; i < titles.length; i++) {
+        var title = titles[i];
+        var cleanQuery = title.replace(/[:\-–—]/g, ' ').trim();
+        var suggestUrl = 'https://ver.gnula.one/wp-json/gnula/v1/suggest?q=' + encodeURIComponent(cleanQuery);
+        var jsonStr = await fetchText(suggestUrl, { 'Referer': 'https://ver.gnula.one/' }, 4000);
+        var items = [];
+        try {
+            items = JSON.parse(jsonStr);
+        } catch(err) { continue; }
+
+        if (!Array.isArray(items) || items.length === 0) continue;
+
+        var matched = null;
+        for (var j = 0; j < items.length; j++) {
+            var item = items[j];
+            var itemType = (item.type || '').toLowerCase();
+            if (isTv && !itemType.includes('serie')) continue;
+            if (!isTv && itemType.includes('serie')) continue;
+
+            if (yearTarget && item.year) {
+                var diff = Math.abs(parseInt(item.year, 10) - parseInt(yearTarget, 10));
+                if (diff <= 1) {
+                    matched = item;
+                    break;
                 }
-                if (!best) {
-                    best = candidates[0];
-                }
-                matchedPageUrl = best.link;
-                if (type === 'tv') {
-                    const slugMatch = matchedPageUrl.match(/\/serie\/([^\/]+)/);
-                    if (slugMatch) matchedSlug = slugMatch[1];
-                }
+            } else {
+                matched = item;
                 break;
             }
         }
 
-        if (!matchedPageUrl && !matchedSlug) {
-            console.log(`[CUEVANA] No se encontró entrada para ${titles[0]}`);
-            return null;
-        }
-
-        let targetContentUrl = matchedPageUrl;
-        if (type === 'tv') {
-            targetContentUrl = `https://cuevana3c.pro/serie/${matchedSlug}/episodio-${s}x${e}`;
-        }
-
-        console.log(`[CUEVANA] Obteniendo página de reproducción: ${targetContentUrl}`);
-        const contentHtml = await fetchText(targetContentUrl, { 'Referer': 'https://cuevana3c.pro/' }, 6000);
-
-        const tabRegex = /<li class="tab-video-item">([\s\S]*?)(?=<li class="tab-video-item">|<\/ul>\s*<\/div>)/g;
-        let tabMatch;
-        const parsedTabs = [];
-
-        while ((tabMatch = tabRegex.exec(contentHtml)) !== null) {
-            const tabBlock = tabMatch[1];
-            const nameMatch = tabBlock.match(/<div class="tab-item-name">\s*([^<]+)/);
-            const imgMatch = tabBlock.match(/<img[^>]+src="?([^"\s>]+)/);
-            const tName = nameMatch ? nameMatch[1].trim() : '';
-            const tImg = imgMatch ? imgMatch[1].trim() : '';
-            const combined = (tName + ' ' + tImg).toLowerCase();
-
-            const tokenMatch = tabBlock.match(/data-server="https:\/\/tungtungsahur\.cuevana3c\.pro\/\?token=([^"]+)"/);
-            const token = tokenMatch ? tokenMatch[1] : null;
-
-            const isSub = /subtitulado|ingl[eé]s|sub\.png|\bvo\b/.test(combined);
-            const isEs = /latino|castellano|español|lat\.png|cas\.png/.test(combined);
-
-            parsedTabs.push({
-                name: tName,
-                token: token,
-                isSub: isSub,
-                isEs: isEs
-            });
-        }
-
-        // PREFERENCIA LINGÜÍSTICA CONFIGURADA:
-        // Si el idioma original es diferente al español (origLang !== 'es', ej. en, ja, ko, fr):
-        // Preferir de forma predeterminada servidor en inglés con subtítulos en español (isSub).
-        // Respaldo a audio en español (isEs) si la obra no cuenta con pestaña subtitulada.
-        // Si la obra es originaria en español (origLang === 'es'), preferir audio nativo en español (isEs).
-        let chosenTab = null;
-        const isForeign = (origLang || 'en').toLowerCase() !== 'es';
-
-        if (isForeign) {
-            chosenTab = parsedTabs.find(t => t.isSub && t.token);
-            if (!chosenTab) {
-                chosenTab = parsedTabs.find(t => t.isEs && t.token);
+        if (!matched && items.length > 0) {
+            for (var k = 0; k < items.length; k++) {
+                var it = items[k];
+                var itType = (it.type || '').toLowerCase();
+                if (isTv && !itType.includes('serie')) continue;
+                if (!isTv && itType.includes('serie')) continue;
+                matched = it;
+                break;
             }
-        } else {
-            chosenTab = parsedTabs.find(t => t.isEs && t.token);
-            if (!chosenTab) {
-                chosenTab = parsedTabs.find(t => t.isSub && t.token);
+            if (!matched) matched = items[0];
+        }
+        if (!matched || !matched.url) continue;
+
+        console.log('[GNULA] Match: "' + matched.title + '" (' + matched.year + ') -> ' + matched.url);
+        var postHtml = await fetchText(matched.url, { 'Referer': 'https://ver.gnula.one/' }, 5000);
+        if (!postHtml) continue;
+
+        var serverBlockRegex = /<div[^>]*id="(gn-ls-[^"]+)"[\s\S]*?<\/div>/g;
+        var bMatch;
+        var collectedOptions = [];
+
+        while ((bMatch = serverBlockRegex.exec(postHtml)) !== null) {
+            var tabId = bMatch[1].toLowerCase();
+            var isSub = tabId.indexOf('sub') !== -1;
+            var isLat = tabId.indexOf('lat') !== -1;
+            var isCas = tabId.indexOf('cas') !== -1 || tabId.indexOf('esp') !== -1;
+
+            var linkRegex = /<a class="gn-srv"[^>]*data-src="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+            var lMatch;
+            while ((lMatch = linkRegex.exec(bMatch[0])) !== null) {
+                var trembedUrl = lMatch[1].replace(/&#038;/g, '&');
+                var label = lMatch[2].replace(/<[^>]+>/g, '').trim();
+                collectedOptions.push({
+                    isSub: isSub,
+                    isLat: isLat,
+                    isCas: isCas,
+                    label: label,
+                    trembedUrl: trembedUrl
+                });
             }
         }
 
-        if (!chosenTab && parsedTabs.length > 0) {
-            chosenTab = parsedTabs.find(t => t.token);
-        }
+        collectedOptions.sort(function(a, b) {
+            var scoreA = (a.isSub ? 100 : 0) + (a.isLat ? 50 : 0);
+            var scoreB = (b.isSub ? 100 : 0) + (b.isLat ? 50 : 0);
+            return scoreB - scoreA;
+        });
 
-        if (!chosenTab || !chosenTab.token) {
-            console.log(`[CUEVANA] No se encontraron tokens válidos en ${targetContentUrl}`);
-            return null;
-        }
+        for (var o = 0; o < collectedOptions.length; o++) {
+            var opt = collectedOptions[o];
+            var trembedHtml = await fetchText(opt.trembedUrl, { 'Referer': matched.url }, 4000);
+            var ifrMatch = trembedHtml.match(/<iframe[^>]*src="([^"]+)"/i);
+            if (!ifrMatch) continue;
 
-        const selectedToken = chosenTab.token;
-        const isSubtitulado = chosenTab.isSub;
-        const selectedLangLabel = isSubtitulado 
-            ? 'Inglés (Subtitulado Español)' 
-            : (chosenTab.name || (chosenTab.isEs ? 'Español' : 'Audio'));
+            var ifrUrl = ifrMatch[1].replace(/&#038;/g, '&');
 
-        const embedUrl = decryptCuevanaToken(selectedToken);
-        console.log(`[CUEVANA] Token desencriptado (${selectedLangLabel}): ${embedUrl}`);
-        if (!embedUrl) return null;
-
-        if (embedUrl.includes('ikhjerbhye3wjkhoduh5xiczuvd.lol') || embedUrl.includes('lkhjerbhye3wjkhodvh5xlczuvd.lol')) {
-            const embedHtml = await fetchText(embedUrl, { 'Referer': 'https://tungtungsahur.cuevana3c.pro/' }, 6000);
-            const packedMatch = embedHtml.match(/eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\('\|'\)\)\)/);
-            if (packedMatch) {
-                const unpacked = unpackPackedJS(packedMatch[0]);
-                const m3u8Match = unpacked.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]+/);
-                if (m3u8Match) {
-                    const directM3u8 = m3u8Match[0];
-                    console.log(`[CUEVANA SUCCESS] Stream m3u8 obtenido (${selectedLangLabel}):`, directM3u8);
-                    return {
+            // 1. VOE Hoster
+            if (ifrUrl.indexOf('voe.sx') !== -1 || ifrUrl.indexOf('voe.') !== -1 || ifrUrl.indexOf('shannoncoldalready') !== -1) {
+                var voeM3u8 = await resolveVoeStream(ifrUrl);
+                if (voeM3u8) {
+                    results.push({
                         status: 'ok',
                         id: id,
                         type: type,
                         season: s,
                         episode: e,
-                        direct_stream_url: directM3u8,
+                        direct_stream_url: voeM3u8,
+                        server: 'Gnula ' + (opt.isSub ? 'Inglés (Subtitulado Español)' : (opt.isLat ? 'Latino' : 'Castellano')) + ' HD',
+                        is_sub: opt.isSub,
                         quality: '1080p',
                         format: 'hls',
-                        server: `Cuevana3c ${selectedLangLabel} HD`,
-                        audio_es: !isSubtitulado,
+                        audio_es: !opt.isSub,
                         sub_es: null,
                         subtitles: []
-                    };
+                    });
+                    if (opt.isSub) break;
+                }
+            }
+
+            // 2. VidHide Hoster
+            if (ifrUrl.indexOf('ikhjerbhye3wjkhoduh5xiczuvd.lol') !== -1 || ifrUrl.indexOf('vidhide') !== -1) {
+                var vhHtml = await fetchText(ifrUrl, { 'Referer': opt.trembedUrl }, 4000);
+                var vhPacked = vhHtml.match(/eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\('\|'\)\)\)/);
+                if (vhPacked) {
+                    var vhUnpacked = unpackPackedJS(vhPacked[0]);
+                    var vhM3u8 = vhUnpacked.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]+/);
+                    if (vhM3u8) {
+                        results.push({
+                            status: 'ok',
+                            id: id,
+                            type: type,
+                            season: s,
+                            episode: e,
+                            direct_stream_url: vhM3u8[0],
+                            server: 'Gnula ' + (opt.isSub ? 'Inglés (Subtitulado Español)' : (opt.isLat ? 'Latino' : 'Castellano')) + ' HD',
+                            is_sub: opt.isSub,
+                            quality: '1080p',
+                            format: 'hls',
+                            audio_es: !opt.isSub,
+                            sub_es: null,
+                            subtitles: []
+                        });
+                        if (opt.isSub) break;
+                    }
                 }
             }
         }
-
-        return null;
-    } catch(err) {
-        console.error(`[CUEVANA ERROR] ${err.message}`);
-        return null;
+        if (results.length > 0) break;
     }
+    return results;
+}
+
+async function resolveCuevanaStreams(id, type, s, e, titles, yearTarget, origLang) {
+    var results = [];
+    var isTv = type === 'tv';
+    var matchedPageUrl = null;
+
+    for (var i = 0; i < titles.length; i++) {
+        var titleQuery = titles[i];
+        var cleanQuery = titleQuery.replace(/[:\-–—]/g, ' ').trim();
+        var searchUrl = 'https://cuevana3c.pro/explorar?s=' + encodeURIComponent(cleanQuery);
+        var searchHtml = await fetchText(searchUrl, { 'Referer': 'https://cuevana3c.pro/' }, 5000);
+        
+        var cardRegex = /<div class="movie-item">\s*<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/div>/g;
+        var m;
+        var candidates = [];
+        while ((m = cardRegex.exec(searchHtml)) !== null) {
+            var link = m[1];
+            var inner = m[2];
+            var isTypeMatch = isTv ? link.indexOf('/serie/') !== -1 : link.indexOf('/pelicula/') !== -1;
+            if (!isTypeMatch) continue;
+            
+            var titleM = inner.match(/<p>([^<]+)<\/p>/);
+            var yearM = inner.match(/<span class="year[^"]*">([^<]+)<\/span>/);
+            candidates.push({
+                url: link,
+                title: titleM ? titleM[1].trim() : '',
+                year: yearM ? yearM[1].trim() : ''
+            });
+        }
+
+        if (candidates.length > 0) {
+            if (yearTarget) {
+                var yearMatch = candidates.find(function(c) { return c.year && c.year.indexOf(yearTarget) !== -1; });
+                if (yearMatch) {
+                    matchedPageUrl = yearMatch.url;
+                    break;
+                }
+            }
+            matchedPageUrl = candidates[0].url;
+            break;
+        }
+    }
+
+    if (!matchedPageUrl) return results;
+
+    var targetContentUrl = matchedPageUrl;
+    if (isTv) {
+        var slugMatch = matchedPageUrl.match(/\/serie\/([^\/]+)/);
+        if (slugMatch) {
+            targetContentUrl = 'https://cuevana3c.pro/serie/' + slugMatch[1] + '/episodio-' + s + 'x' + e;
+        } else {
+            targetContentUrl = matchedPageUrl.replace(/\/$/, '') + '/episodio-' + s + 'x' + e;
+        }
+    }
+
+    var detailHtml = await fetchText(targetContentUrl, { 'Referer': 'https://cuevana3c.pro/' }, 6000);
+    var tabRegex = /<li class="tab-video-item">([\s\S]*?)(?=<li class="tab-video-item">|<\/ul>\s*<\/div>)/g;
+    var tabMatch;
+    var parsedTabs = [];
+
+    while ((tabMatch = tabRegex.exec(detailHtml)) !== null) {
+        var tabBlock = tabMatch[1];
+        var nameMatch = tabBlock.match(/<div class="tab-item-name">\s*([^<]+)/);
+        var imgMatch = tabBlock.match(/<img[^>]+src="?([^"\s>]+)/);
+        var tName = nameMatch ? nameMatch[1].trim() : '';
+        var tImg = imgMatch ? imgMatch[1].trim() : '';
+        var combined = (tName + ' ' + tImg).toLowerCase();
+
+        var tokenMatch = tabBlock.match(/data-server="https:\/\/tungtungsahur\.cuevana3c\.pro\/\?token=([^"]+)"/);
+        var token = tokenMatch ? tokenMatch[1] : null;
+
+        var isSub = /subtitulado|ingl[eé]s|sub\.png|\bvo\b/.test(combined);
+        var isEs = /latino|castellano|español|lat\.png|cas\.png/.test(combined);
+
+        parsedTabs.push({
+            name: tName,
+            token: token,
+            isSub: isSub,
+            isEs: isEs
+        });
+    }
+
+    for (var t = 0; t < parsedTabs.length; t++) {
+        var tab = parsedTabs[t];
+        if (!tab.token) continue;
+        var tabSub = tab.isSub;
+        var label = tabSub ? 'Inglés (Subtitulado Español)' : (tab.name || (tab.isEs ? 'Latino' : 'Audio'));
+        var embedUrl = decryptCuevanaToken(tab.token);
+        if (!embedUrl) continue;
+
+        if (embedUrl.indexOf('ikhjerbhye3wjkhoduh5xiczuvd.lol') !== -1 || embedUrl.indexOf('lkhjerbhye3wjkhodvh5xlczuvd.lol') !== -1) {
+            var embedHtml = await fetchText(embedUrl, { 'Referer': 'https://tungtungsahur.cuevana3c.pro/' }, 5000);
+            var packedMatch = embedHtml.match(/eval\(function\(p,a,c,k,e,d\)[\s\S]*?\.split\('\|'\)\)\)/);
+            if (packedMatch) {
+                var unpacked = unpackPackedJS(packedMatch[0]);
+                var m3u8Match = unpacked.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]+/);
+                if (m3u8Match) {
+                    results.push({
+                        status: 'ok',
+                        id: id,
+                        type: type,
+                        season: s,
+                        episode: e,
+                        direct_stream_url: m3u8Match[0],
+                        server: 'Cuevana3c ' + label + ' HD',
+                        is_sub: tabSub,
+                        quality: '1080p',
+                        format: 'hls',
+                        audio_es: !tabSub,
+                        sub_es: null,
+                        subtitles: []
+                    });
+                }
+            }
+        }
+    }
+    return results;
+}
+
+function deduplicateAndRankStreams(candidates, origLang) {
+    var isForeign = (origLang || 'en').toLowerCase() !== 'es';
+    var seenUrls = new Set();
+    var unique = [];
+
+    for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        if (!c || !c.direct_stream_url) continue;
+        var normUrl = c.direct_stream_url.split('?')[0];
+        if (seenUrls.has(normUrl)) {
+            console.log('[DEDUP] Omitiendo stream duplicado: ' + normUrl);
+            continue;
+        }
+        seenUrls.add(normUrl);
+
+        var score = 0;
+        if (c.is_sub) {
+            score += 1000; // Preferencia universal solicitada: HD con subtítulos
+        } else if (c.audio_es) {
+            score += 200;
+        }
+
+        if (c.quality === '1080p' || c.quality === 'HD') {
+            score += 500;
+        }
+
+        if (!isForeign && c.audio_es) {
+            score += 2000; // Obra original en español
+        }
+
+        c.score = score;
+        unique.push(c);
+    }
+
+    unique.sort(function(a, b) { return b.score - a.score; });
+    return unique;
+}
+
+function safeAll(promises) {
+    return Promise.all(promises.map(function(p) {
+        return Promise.resolve(p).catch(function(err) {
+            console.warn('[SAFE_ALL ERROR]', err && err.message ? err.message : err);
+            return null;
+        });
+    }));
 }
 
 async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '') {
@@ -889,22 +1086,59 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
         return decorateWithAligned(rewriteSubHost(cached.data, reqHost), id, type, s, e, reqHost);
     }
 
-    // CUEVANA3C NATIVE: Exclusivo y único motor para Películas y Series (Español Latino / Castellano HD nativo)
+    let titles = [expectedTitle, expectedOrigTitle].filter(Boolean);
+    let yearTarget = null;
+    let resolvedOrigLang = origLang;
+
     try {
-        const cuevanaStream = await resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expectedOrigTitle, origLang);
-        if (cuevanaStream && cuevanaStream.status === 'ok' && cuevanaStream.direct_stream_url) {
-            TMDB_STREAM_CACHE.set(cacheKey, { data: cuevanaStream, ts: now });
-            return decorateWithAligned(cuevanaStream, id, type, s, e, reqHost);
+        const tmdbRes = await proxyTmdbRequest(type === 'tv' ? `tv/${id}` : `movie/${id}`, 'language=es-MX');
+        const tmdbJson = JSON.parse(tmdbRes.body);
+        if (tmdbJson.title) titles.push(tmdbJson.title);
+        if (tmdbJson.name) titles.push(tmdbJson.name);
+        if (tmdbJson.original_title) titles.push(tmdbJson.original_title);
+        if (tmdbJson.original_name) titles.push(tmdbJson.original_name);
+        if (tmdbJson.original_language) resolvedOrigLang = tmdbJson.original_language;
+        const dateStr = tmdbJson.release_date || tmdbJson.first_air_date || '';
+        if (dateStr) yearTarget = dateStr.slice(0, 4);
+    } catch(e) {}
+    titles = Array.from(new Set(titles.filter(Boolean)));
+
+    console.log(`[DUAL_RESOLVER] Consultando Cuevana3c y Gnula para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
+
+    try {
+        const dualResults = await safeAll([
+            resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
+            resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang)
+        ]);
+
+        const allCandidates = [].concat(dualResults[0] || [], dualResults[1] || []);
+        console.log(`[DUAL_RESOLVER] Total candidatos obtenidos de Cuevana + Gnula: ${allCandidates.length}`);
+
+        const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang);
+        console.log(`[DUAL_RESOLVER] Candidatos únicos y clasificados: ${ranked.length}`);
+
+        if (ranked.length > 0) {
+            const primary = ranked[0];
+            primary.servers = ranked.map(c => ({
+                name: c.server,
+                url: c.direct_stream_url,
+                quality: c.quality,
+                is_sub: c.is_sub,
+                audio_es: c.audio_es
+            }));
+            console.log(`[DUAL_RESOLVER SUCCESS] Stream ganador seleccionado (${primary.server}, score: ${primary.score}):`, primary.direct_stream_url.slice(0, 80) + '...');
+            TMDB_STREAM_CACHE.set(cacheKey, { data: primary, ts: now });
+            return decorateWithAligned(primary, id, type, s, e, reqHost);
         }
-    } catch (cuevanaErr) {
-        console.warn(`[CUEVANA] Error: ${cuevanaErr.message}`);
+    } catch (dualErr) {
+        console.warn(`[DUAL_RESOLVER] Error durante resolución: ${dualErr.message}`);
     }
 
     return {
         status: 'not_found',
         id: id,
         type: type,
-        message: 'Contenido no disponible en Cuevana3c por el momento.'
+        message: 'Contenido no disponible en Cuevana3c ni en Gnula por el momento.'
     };
 }
 
