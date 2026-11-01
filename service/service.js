@@ -679,7 +679,7 @@ function resolveVixsrcStream(id, type, s, e) {
         const req = https.request(opts, (res) => {
             let data = '';
             res.on('data', c => { data += c; });
-            res.on('end', () => {
+            res.on('end', async () => {
                 try {
                     const json = JSON.parse(data);
                     const embedPath = json.src || json.embed;
@@ -737,6 +737,68 @@ function resolveVixsrcStream(id, type, s, e) {
     });
 }
 
+
+function fetchExternalOpenSubtitles(tmdbId, mediaType, s, e) {
+    return new Promise(async (resolve) => {
+        try {
+            // 1. Obtener IMDB ID de TMDB
+            const extUrl = `https://nabby.pro/api/tmdb/${mediaType}/${tmdbId}/external_ids`;
+            let imdbId = null;
+            try {
+                const extData = await new Promise((res, rej) => {
+                    const req = https.get(extUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 3000 }, (r) => {
+                        let d = '';
+                        r.on('data', c => d += c);
+                        r.on('end', () => { try { res(JSON.parse(d)); } catch(er) { res({}); } });
+                    });
+                    req.on('error', () => res({}));
+                    req.on('timeout', () => { req.abort(); res({}); });
+                });
+                imdbId = extData.imdb_id;
+            } catch(e) {}
+
+            const targetId = imdbId || tmdbId;
+            const isTv = mediaType === 'tv';
+            const osUrl = isTv 
+                ? `https://opensubtitles-v3.strem.io/subtitles/series/${targetId}:${s}:${e}.json`
+                : `https://opensubtitles-v3.strem.io/subtitles/movie/${targetId}.json`;
+
+            const parsed = url.parse(osUrl);
+            const req = https.request({
+                hostname: parsed.hostname,
+                port: 443,
+                path: parsed.path,
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+                },
+                timeout: 3500
+            }, (res) => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => {
+                    try {
+                        const json = JSON.parse(data);
+                        const rawSubs = json.subtitles || [];
+                        const formatted = rawSubs.map(s => ({
+                            url: s.url,
+                            label: `OpenSubtitles • ${s.lang || 'es'}`,
+                            lang: s.lang || 'es',
+                            language: s.lang || 'es',
+                            format: 'vtt',
+                            source: 'opensubtitles'
+                        }));
+                        resolve(formatted);
+                    } catch(err) { resolve([]); }
+                });
+            });
+            req.on('error', () => resolve([]));
+            req.on('timeout', () => { req.abort(); resolve([]); });
+            req.end();
+        } catch(ex) { resolve([]); }
+    });
+}
+
 function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en') {
     const cacheKey = `${id}_${type}_${s}_${e}`;
     const now = Date.now();
@@ -763,7 +825,7 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
         const req = https.request(opts, (res) => {
             let data = '';
             res.on('data', chunk => { data += chunk; });
-            res.on('end', () => {
+            res.on('end', async () => {
                 try {
                     const json = JSON.parse(data);
                     if (json.success && json.sources && json.sources.length > 0) {
@@ -789,11 +851,24 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                         const isExplicitSpanish = ['spanish', 'español', 'castellano', 'latino', 'lat'].some(w => labelLower.includes(w) || streamUrlLower.includes(w));
                         const isEnglishTrack = ['english', 'inglés', 'eng'].some(w => labelLower.includes(w)) || streamUrlLower.includes('the+awakening');
                         const isAudioSpanish = isExplicitSpanish || (origLang === 'es' && !isEnglishTrack);
-                        const subs = json.subtitles || [];
-                        const esSub = subs.find(sub => {
+                        let subs = json.subtitles || [];
+                        let esSub = subs.find(sub => {
                             const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
                             return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('castellano');
                         });
+                        if (!esSub) {
+                            try {
+                                const osSubs = await fetchExternalOpenSubtitles(id, type, s, e);
+                                if (osSubs && osSubs.length > 0) {
+                                    subs = subs.concat(osSubs);
+                                    esSub = subs.find(sub => {
+                                        const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
+                                        return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('castellano');
+                                    });
+                                }
+                            } catch(eOs) {}
+                        }
+
 
                         const result = {
                             status: 'ok',
