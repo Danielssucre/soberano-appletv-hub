@@ -12265,7 +12265,7 @@
 
                 if (currentCustomSub) {
                     // Cargar VTT en el motor overlay visual (soberanoSubOverlay)
-                    fetch(currentCustomSub)
+                    fetch(encodeURI(currentCustomSub))
                         .then(r => {
                             if (!r.ok) throw new Error(`HTTP ${r.status}`);
                             return r.text();
