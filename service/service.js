@@ -620,7 +620,43 @@ function triggerAlign(id, type, s, e, streamUrl) {
     });
 }
 
-function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099') {
+function scoreTmdbSource(s, originalLang) {
+    originalLang = (originalLang || 'en').toLowerCase();
+    const server = (s.server || '').toLowerCase();
+    const quality = (s.quality || '').toLowerCase();
+    const label = `${server} ${quality}`;
+
+    // REGLA DE ORO LINGÜÍSTICA:
+    // Penalización severa a audios doblados en idiomas índicos (Hindi, Telugu, Tamil, etc.)
+    // a menos que la obra original sea de la India.
+    const indicLangs = ['hindi', 'telugu', 'tamil', 'malayalam', 'kannada', 'bengali', 'marathi', 'punjabi', 'urdu'];
+    const isIndic = indicLangs.some(w => label.includes(w));
+    if (isIndic && !['hi', 'te', 'ta', 'ml', 'kn', 'bn', 'mr', 'pa', 'ur'].includes(originalLang)) {
+        return -1000;
+    }
+
+    let score = 0;
+    // 1. Audio doblado en Español (Máxima prioridad para usuario hispanohablante)
+    if (['spanish', 'español', 'castellano', 'latino', 'es-es', 'es-mx'].some(w => label.includes(w))) {
+        score += 500;
+    }
+    // 2. Audio en idioma original (Inglés / VO / Original)
+    if (['english', 'inglés', 'eng', 'original', 'org', 'vo'].some(w => label.includes(w))) {
+        score += 300;
+    } else if (!isIndic) {
+        score += 200; // Servidores estándar globales limpios (PrimeVids, FastCloud, Titan, etc.)
+    }
+
+    // Resolución
+    if (label.includes('1080') || quality.includes('1080')) score += 50;
+    else if (label.includes('720') || quality.includes('720')) score += 20;
+
+    // Estabilidad directa de contenedor
+    if (s.type === 'mp4') score += 15;
+    return score;
+}
+
+function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en') {
     const cacheKey = `${id}_${type}_${s}_${e}`;
     const now = Date.now();
     const cached = TMDB_STREAM_CACHE.get(cacheKey);
@@ -650,7 +686,11 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                 try {
                     const json = JSON.parse(data);
                     if (json.success && json.sources && json.sources.length > 0) {
-                        const directUrl = json.sources[0].url;
+                        // SOBERANO AUDIO CURATOR: Filtrar y priorizar idioma real / español
+                        const sortedSources = json.sources.slice().sort((a, b) => scoreTmdbSource(b, origLang) - scoreTmdbSource(a, origLang));
+                        const chosenSource = sortedSources[0];
+                        const directUrl = chosenSource.url;
+                        const isAudioSpanish = ['spanish', 'español', 'castellano', 'latino'].some(w => (chosenSource.server + ' ' + chosenSource.quality).toLowerCase().includes(w)) || (origLang === 'es');
                         const subs = json.subtitles || [];
                         const esSub = subs.find(sub => {
                             const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
@@ -664,8 +704,11 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                             season: s,
                             episode: e,
                             direct_stream_url: directUrl,
-                            quality: json.sources[0].quality || '1080p',
-                            format: json.sources[0].type || 'mp4',
+                            quality: chosenSource.quality || '1080p',
+                            format: chosenSource.type || 'mp4',
+                            server: chosenSource.server || '',
+                            audio_es: isAudioSpanish,
+                            orig_lang: origLang,
                             sub_es: esSub ? esSub.url : null,
                             subtitles: subs
                         };
@@ -987,7 +1030,8 @@ const server = http.createServer(async (req, res) => {
         const e = parsed.query.e || 1;
 
         try {
-            const streamData = await resolveTmdbStream(id, type, s, e, reqHost);
+            const origLang = parsed.query.orig_lang || 'en';
+        const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang);
             if (streamData && streamData.status === 'ok' && !streamData.aligned && streamData.direct_stream_url && parsed.query.noalign !== '1') {
                 streamData.aligning = true;
                 triggerAlign(id, type, s, e, streamData.direct_stream_url);
