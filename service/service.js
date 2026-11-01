@@ -656,6 +656,87 @@ function scoreTmdbSource(s, originalLang) {
     return score;
 }
 
+
+function resolveVixsrcStream(id, type, s, e) {
+    return new Promise((resolve) => {
+        const isTv = type === 'tv' || (s !== null && e !== null && type !== 'movie');
+        const apiUrlStr = isTv ? `https://vixsrc.to/api/tv/${id}/${s}/${e}` : `https://vixsrc.to/api/movie/${id}`;
+        const refUrl = isTv ? `https://vixsrc.to/tv/${id}/${s}/${e}` : `https://vixsrc.to/movie/${id}`;
+        
+        const parsedApi = url.parse(apiUrlStr);
+        const opts = {
+            hostname: parsedApi.hostname,
+            port: 443,
+            path: parsedApi.path,
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
+                'Referer': refUrl
+            },
+            timeout: 5000
+        };
+
+        const req = https.request(opts, (res) => {
+            let data = '';
+            res.on('data', c => { data += c; });
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    const embedPath = json.src || json.embed;
+                    if (!embedPath) return resolve(null);
+                    const embedUrl = 'https://vixsrc.to' + embedPath;
+                    const parsedEmbed = url.parse(embedUrl);
+                    
+                    const opts2 = {
+                        hostname: parsedEmbed.hostname,
+                        port: 443,
+                        path: parsedEmbed.path,
+                        method: 'GET',
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
+                            'Referer': refUrl
+                        },
+                        timeout: 5000
+                    };
+
+                    const req2 = https.request(opts2, (res2) => {
+                        let html = '';
+                        res2.on('data', c => { html += c; });
+                        res2.on('end', () => {
+                            const mToken = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
+                            const mExpires = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
+                            const mUrl = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+)['"]/);
+                            if (mToken && mExpires && mUrl) {
+                                const masterUrl = `${mUrl[1]}?token=${mToken[1]}&expires=${mExpires[1]}&h=1`;
+                                return resolve({
+                                    status: 'ok',
+                                    id: id,
+                                    type: type,
+                                    season: s,
+                                    episode: e,
+                                    direct_stream_url: masterUrl,
+                                    quality: '1080p',
+                                    format: 'hls',
+                                    server: 'VixSrc Clean VO Master',
+                                    audio_es: false,
+                                    orig_lang: 'en'
+                                });
+                            }
+                            resolve(null);
+                        });
+                    });
+                    req2.on('error', () => resolve(null));
+                    req2.on('timeout', () => { req2.abort(); resolve(null); });
+                    req2.end();
+                } catch(e) { resolve(null); }
+            });
+        });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.abort(); resolve(null); });
+        req.end();
+    });
+}
+
 function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en') {
     const cacheKey = `${id}_${type}_${s}_${e}`;
     const now = Date.now();
@@ -716,6 +797,24 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                             sub_es: esSub ? esSub.url : null,
                             subtitles: subs
                         };
+                        const topScore = scoreTmdbSource(sortedSources[0], origLang);
+                        if (topScore <= -500) {
+                            // Todas las fuentes de Framex están contaminadas con doblajes de la India.
+                            // Ejecutar failover automático a VixSrc (Audio Original en Inglés).
+                            console.log(`[AUDIO SHIELD] Fuentes de Framex contaminadas para ${id} (${type}). Conmutando a VixSrc VO...`);
+                            resolveVixsrcStream(id, type, s, e).then(vixData => {
+                                if (vixData) {
+                                    vixData.subtitles = subs;
+                                    vixData.sub_es = esSub ? esSub.url : null;
+                                    TMDB_STREAM_CACHE.set(cacheKey, { data: vixData, ts: now });
+                                    return resolve(decorateWithAligned(vixData, id, type, s, e, reqHost));
+                                }
+                                // Si no hay VixSrc, usar la fuente elegida
+                                TMDB_STREAM_CACHE.set(cacheKey, { data: result, ts: now });
+                                return resolve(decorateWithAligned(result, id, type, s, e, reqHost));
+                            });
+                            return;
+                        }
                         TMDB_STREAM_CACHE.set(cacheKey, { data: result, ts: now });
                         return resolve(decorateWithAligned(result, id, type, s, e, reqHost));
                     }
