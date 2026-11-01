@@ -2718,6 +2718,50 @@
                     <div class="shelf-track" id="trackMoviesCartelera"></div>
                 </div>
             </section>
+
+            <!-- Fila 6: Terror y Suspenso -->
+            <section class="shelf-section">
+                <div class="shelf-header">
+                    <h2 class="shelf-title"><i class="fa fa-ghost" style="font-size:20px; color:#ff453a;"></i> Terror y Suspenso</h2>
+                    <span class="shelf-subtitle">Escalofríos y misterio psicológico</span>
+                </div>
+                <div class="shelf-track-container">
+                    <div class="shelf-track" id="trackMoviesHorror"></div>
+                </div>
+            </section>
+
+            <!-- Fila 7: Thrillers y Crimen -->
+            <section class="shelf-section">
+                <div class="shelf-header">
+                    <h2 class="shelf-title"><i class="fa fa-mask" style="font-size:20px; color:#af52de;"></i> Thrillers e Intriga</h2>
+                    <span class="shelf-subtitle">Tensión y giros impredecibles</span>
+                </div>
+                <div class="shelf-track-container">
+                    <div class="shelf-track" id="trackMoviesThriller"></div>
+                </div>
+            </section>
+
+            <!-- Fila 8: Cine de Animación Familiar -->
+            <section class="shelf-section">
+                <div class="shelf-header">
+                    <h2 class="shelf-title"><i class="fa fa-magic" style="font-size:20px; color:#5ac8fa;"></i> Cine de Animación</h2>
+                    <span class="shelf-subtitle">Joyas animadas para todas las edades</span>
+                </div>
+                <div class="shelf-track-container">
+                    <div class="shelf-track" id="trackMoviesAnimation"></div>
+                </div>
+            </section>
+
+            <!-- Fila 9: Comedia y Entretenimiento -->
+            <section class="shelf-section">
+                <div class="shelf-header">
+                    <h2 class="shelf-title"><i class="fa fa-laugh" style="font-size:20px; color:#ffd60a;"></i> Comedia y Risas</h2>
+                    <span class="shelf-subtitle">Historias ligeras y diversión garantizada</span>
+                </div>
+                <div class="shelf-track-container">
+                    <div class="shelf-track" id="trackMoviesComedy"></div>
+                </div>
+            </section>
         </div>
 
         <!-- ==========================================
@@ -11644,6 +11688,10 @@
             fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=28', 'trackMoviesAction', 'movie');
             fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=878', 'trackMoviesScifi', 'movie');
             fetchAndRenderTmdbRow('/api/tmdb/movie/now_playing', 'trackMoviesCartelera', 'movie');
+            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=27', 'trackMoviesHorror', 'movie');
+            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=53', 'trackMoviesThriller', 'movie');
+            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=16', 'trackMoviesAnimation', 'movie');
+            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=35', 'trackMoviesComedy', 'movie');
         }
 
         async function loadSeriesView(forceRefresh = false) {
@@ -11741,8 +11789,8 @@
             const rating = item.vote_average ? `${item.vote_average.toFixed(1)} ★` : '';
             const safeTitle = title.replace(/'/g, '');
 
-            card.onclick = () => openTmdbDetailsSheet(item, type);
-            card.onkeydown = (e) => { if (e.key === 'Enter') openTmdbDetailsSheet(item, type); };
+            card.onclick = () => { closeSearchModal(); openTmdbDetailsSheet(item, type); };
+            card.onkeydown = (e) => { if (e.key === 'Enter') { closeSearchModal(); openTmdbDetailsSheet(item, type); } };
 
             card.innerHTML = `
                 <div class="poster-wrap">
@@ -11825,8 +11873,37 @@
                     full.seasons = sNums.map(s => ({ season_number: s, name: `Temporada ${s}` }));
                     window.__cinemetaVideos = vids;
                 } else {
-                    const resp = await fetch(`${PROXY_BASE}/api/tmdb/${mediaType}/${item.id}?language=es-MX&append_to_response=credits,recommendations,videos`);
-                    full = await resp.json();
+                    let resp = await fetch(`${PROXY_BASE}/api/tmdb/${mediaType}/${item.id}?language=es-MX&append_to_response=credits,recommendations,videos`);
+                    full = await resp.json().catch(() => ({}));
+                    // Si TMDB 404 o sin títulos, verificar si es serie/película con el tipo opuesto (ej. Derry que es Serie TV)
+                    if (!full || !full.id || (!full.title && !full.name)) {
+                        const altType = mediaType === 'movie' ? 'tv' : 'movie';
+                        try {
+                            const altResp = await fetch(`${PROXY_BASE}/api/tmdb/${altType}/${item.id}?language=es-MX&append_to_response=credits,recommendations,videos`);
+                            if (altResp.ok) {
+                                const altData = await altResp.json();
+                                if (altData && (altData.title || altData.name)) {
+                                    console.log(`[TMDB TYPE-CORRECTION] ${item.id} corregido de ${mediaType} a ${altType}`);
+                                    mediaType = altType;
+                                    activeTmdbItem.media_type = altType;
+                                    full = altData;
+                                    const y = (full.release_date || full.first_air_date || '').substring(0, 4);
+                                    badgesWrap.innerHTML = `
+                                        <span class="meta-badge">${y || '2025'}</span>
+                                        <span class="meta-badge">${mediaType === 'movie' ? '🎬 Película' : '📺 Serie TV'}</span>
+                                        <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
+                                        <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);">Subtítulos en Español</span>
+                                    `;
+                                    if (actionBar) {
+                                        const btnPlay = document.getElementById('btnSheetPlayMovie');
+                                        if (btnPlay) btnPlay.style.display = mediaType === 'movie' ? 'inline-flex' : 'none';
+                                    }
+                                }
+                            }
+                        } catch(eAlt) {
+                            console.warn('[TMDB] Fallo comprobando tipo alternativo:', eAlt);
+                        }
+                    }
                 }
                 
                 if (full.title || full.name) {
