@@ -582,19 +582,29 @@ function alignedName(type, id, s, e) {
     return `auto_${type}_${id}_${s}_${e}.vtt`;
 }
 
+function isCorruptedSubFile(p) {
+    try {
+        const sample = fs.readFileSync(p, 'utf8').slice(0, 4000);
+        // Detectar mojibake árabe/persa (UTF-8 leído como Windows-1256) o archivos vacíos
+        if (/[\u0600-\u06FF]/.test(sample) || !sample.includes('-->')) return true;
+        return false;
+    } catch(e) { return true; }
+}
+
 function decorateWithAligned(data, id, type, s, e, reqHost) {
     if (!data || data.status !== 'ok') return data;
     const out = Object.assign({}, data);
     const name = alignedName(type, id, s, e);
     const p = path.join(SUBTITLES_DIR, name);
     out.aligned = false;
-    if (fs.existsSync(p)) {
+    if (fs.existsSync(p) && !isCorruptedSubFile(p)) {
         const url0 = `http://${reqHost}/subtitles/${name}`;
         out.aligned = true;
         out.aligned_url = url0;
         out.sub_es = url0;
-        out.subtitles = [{ url: url0, label: 'Español (Sincronizado con audio)', lang: 'es', language: 'es', format: 'vtt', isDefault: true }]
-            .concat(data.subtitles || []);
+        const cleanExisting = (data.subtitles || []).filter(sub => sub.url !== url0);
+        out.subtitles = [{ url: url0, label: '🎯 Español (Sincronizado con audio)', lang: 'es', language: 'es', format: 'vtt', isDefault: true }]
+            .concat(cleanExisting);
     }
     return out;
 }
@@ -807,16 +817,40 @@ function resolveVixsrcStream(id, type, s, e, reqHost = '127.0.0.1:9099') {
 }
 
 
+function isStrictSpanishCode(str) {
+    if (!str) return false;
+    const s = String(str).toLowerCase().trim();
+    if (['es', 'spa', 'spl', 'spn', 'es-es', 'es-mx', 'es-419', 'es-la', 'es-ar', 'es-co', 'español', 'espanol', 'spanish', 'castellano', 'latino'].includes(s)) {
+        return true;
+    }
+    return /(?:^|[^a-z])(?:spa|spl|spn|es(?:-[a-z0-9]+)?|espa[ñn]ol|spanish|castellano|latino)(?:$|[^a-z])/i.test(s);
+}
+
 function isSpanishSubItem(sub) {
     if (!sub) return false;
-    const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
-    return l.includes('spa') || l.includes('spl') || l.includes('spn') || l.includes('castellano') || l.includes('español') || l.includes('spanish') || /\bes\b/.test(l) || l.startsWith('es');
+    return isStrictSpanishCode(sub.lang) || isStrictSpanishCode(sub.language) || isStrictSpanishCode(sub.label);
 }
 
 function isEnglishSubItem(sub) {
     if (!sub) return false;
     const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
-    return l.includes('eng') || l.includes('english') || /\ben\b/.test(l) || l.startsWith('en');
+    return /(?:^|[^a-z])(?:eng|en(?:-[a-z0-9]+)?|english)(?:$|[^a-z])/i.test(l);
+}
+
+function verifySpanishLinguisticText(text) {
+    if (!text || text.length < 40) return false;
+    // Rechazar corrupción de codificación árabe/persa
+    if (/[\u0600-\u06FF]/.test(text.slice(0, 3000))) return false;
+    // Extraer muestra de diálogo (saltando marcas de tiempo)
+    const sample = text.slice(0, 6000)
+        .replace(/WEBVTT/gi, '')
+        .replace(/\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .toLowerCase();
+    // Palabras ancla exclusivas de alta frecuencia en español + signos ¿ ¡ ñ
+    const esAnchors = sample.match(/(?:\b(?:que|qué|de|la|el|en|los|las|por|con|una|para|del|está|están|pero|como|cómo|más|todo|todos|bien|aquí|ahora|cuando|cuándo|eso|esto|vamos|puedo|tengo|eres|hola|gracias|señor|sí|también|hacer|algo)\b|[¿¡ñáéíóú])/g);
+    const count = esAnchors ? esAnchors.length : 0;
+    return count >= 6;
 }
 
 function fetchExternalOpenSubtitles(tmdbId, mediaType, s, e, reqHost = '127.0.0.1:9099') {
@@ -840,27 +874,47 @@ function fetchExternalOpenSubtitles(tmdbId, mediaType, s, e, reqHost = '127.0.0.
             const data = await fetchText(osUrl, {}, 4000);
             const json = JSON.parse(data);
             const rawSubs = json.subtitles || [];
-            let esCounter = 1;
-            const formatted = rawSubs.map((sub, idx) => {
-                const code = (sub.lang || '').toLowerCase();
-                const isEs = ['spa', 'spl', 'spn', 'es'].includes(code) || code.includes('spa') || code.includes('es');
-                let label = `OpenSubtitles • ${sub.lang || 'sub'}`;
+            let latinoCounter = 1;
+            let espCounter = 1;
+            const seenRawUrls = new Set();
+            const formatted = [];
+            for (let idx = 0; idx < rawSubs.length; idx++) {
+                const sub = rawSubs[idx];
+                if (!sub || !sub.url || seenRawUrls.has(sub.url)) continue;
+                seenRawUrls.add(sub.url);
+                const code = (sub.lang || '').toLowerCase().trim();
+                const isEs = isStrictSpanishCode(code);
+                const isEn = ['eng', 'en'].includes(code);
+                // Solo conservar pistas en Español o Inglés (para traducción neuronal si faltara español)
+                if (!isEs && !isEn) continue;
+                let label = `OpenSubtitles • ${code}`;
+                let priority = 10;
                 if (isEs) {
-                    const region = code === 'spl' ? 'Latino' : (code === 'spn' ? 'España' : 'Oficial');
-                    label = `⚡ Español ${region} #${esCounter++} (OpenSubtitles CF)`;
+                    const isLat = code === 'spl' || code === 'es-mx' || code === 'es-la';
+                    if (isLat) {
+                        label = `⚡ Español Latino #${latinoCounter++}`;
+                        priority = 110 - latinoCounter;
+                    } else {
+                        label = `⚡ Español #${espCounter++}`;
+                        priority = 95 - espCounter;
+                    }
+                    // Limpiar el tope a máximo 4 variantes por región para no inundar con duplicados
+                    if (isLat && latinoCounter > 5) continue;
+                    if (!isLat && espCounter > 5) continue;
                 }
                 const proxiedUrl = `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`;
-                return {
+                formatted.push({
                     url: proxiedUrl,
                     raw_url: sub.url,
                     label: label,
-                    lang: isEs ? 'es' : (sub.lang || 'en'),
-                    language: isEs ? 'es' : (sub.lang || 'en'),
+                    lang: isEs ? 'es' : 'en',
+                    language: isEs ? 'es' : 'en',
                     format: 'vtt',
                     source: 'opensubtitles',
-                    priority: isEs ? (code === 'spl' ? 100 : 95) - idx : 10
-                };
-            });
+                    priority: priority
+                });
+            }
+            formatted.sort((a, b) => (b.priority || 0) - (a.priority || 0));
             resolve(formatted);
         } catch(ex) { resolve([]); }
     });
@@ -976,9 +1030,17 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                             };
                         });
 
-                        // Priorizar OpenSubtitles CF primero (nunca da timeout como cache.vdrk.site)
-                        let subs = osSubs.concat(rawFramexSubs);
-                        const esSubsList = subs.filter(isSpanishSubItem);
+                        // Priorizar OpenSubtitles CF primero y deduplicar URLs repetidas
+                        const seenSubUrls = new Set();
+                        let subs = [];
+                        osSubs.concat(rawFramexSubs).forEach(sItem => {
+                            const key = sItem.raw_url || sItem.url;
+                            if (key && !seenSubUrls.has(key)) {
+                                seenSubUrls.add(key);
+                                subs.push(sItem);
+                            }
+                        });
+                        let esSubsList = subs.filter(isSpanishSubItem);
                         let esSub = esSubsList.length > 0 ? esSubsList[0] : null;
 
                         // Si no existe ningún subtítulo en español pero sí en inglés, activar Traductor Neuronal On-The-Fly ($0)
@@ -998,8 +1060,12 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                                 };
                                 subs.unshift(neuralTrack);
                                 esSub = neuralTrack;
+                                esSubsList = [neuralTrack];
                             }
                         }
+
+                        // Purgar pistas en otros idiomas: devolver al reproductor exclusivamente pistas en Español limpias y deduplicadas
+                        subs = esSubsList;
 
                         const result = {
                             status: 'ok',
@@ -1457,7 +1523,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // 8.1 Subtitle Proxy & SRT-to-WebVTT Transcoder Endpoint (CORS-free + Zero-Desync for webOS)
+    // 8.1 Subtitle Proxy & SRT-to-WebVTT Transcoder Endpoint (CORS-free + Zero-Desync + Linguistic Guard for webOS)
     if (parsed.pathname === '/api/sub_proxy') {
         const subUrl = parsed.query.url;
         if (!subUrl) {
@@ -1467,13 +1533,18 @@ const server = http.createServer(async (req, res) => {
         try {
             let rawSub = await fetchText(subUrl, {}, 5000);
             rawSub = rawSub.replace(/^\uFEFF/, '').replace(/\r/g, '');
-            // Limpiar artefactos de citas y etiquetas ASS/SSA
+            // Limpiar artefactos de citas, spam publicitario y etiquetas ASS/SSA
             rawSub = rawSub.replace(/\[\s*(?:cite|cita)\s*[:：]?\s*\d+\s*\]/gi, '')
                            .replace(/\b(?:cite|cita)\s*[:：]?\s*\d+\b/gi, '')
                            .replace(/\{\\[^}]*\}/g, '');
             // Convertir marcas de tiempo SRT (00:00:14,139) a WebVTT estándar (00:00:14.139)
             rawSub = rawSub.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
                            .replace(/(\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+            // VERIFICACIÓN LINGÜÍSTICA ESPAÑOLA: si una pista etiquetada como 'spa' en OpenSubtitles viene en otro idioma o corrupta, devolver 422 para que el failover pase a la siguiente en <30ms
+            if (!verifySpanishLinguisticText(rawSub)) {
+                res.writeHead(422, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
+                return res.end('Non-Spanish or corrupted subtitle track rejected by Linguistic Guard');
+            }
             if (!/^\s*WEBVTT/i.test(rawSub)) {
                 rawSub = 'WEBVTT\n\n' + rawSub;
             }

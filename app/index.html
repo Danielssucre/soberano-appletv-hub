@@ -10168,13 +10168,27 @@
 
         function cleanSubText(t) {
             if (!t) return '';
-            return t
+            var cleaned = t
                 .replace(/<[^>]+>/g, '')
                 .replace(/\[\s*(?:cite|cita)\s*[:：]?\s*\d+\s*\]/gi, '')
                 .replace(/\b(?:cite|cita)\s*[:：]?\s*\d+\b/gi, '')
                 .replace(/\{\\[^}]*\}/g, '')
                 .replace(/\[\s*\]/g, '')
                 .replace(/[ \t]+/g, ' ')
+                .trim();
+            if (!cleaned) return '';
+            // Purgar firmas de fansubs, spam web y marcas de agua de redes sociales
+            if (/(?:subtitulos\.es|subdivx|opensubtitles|hoofoot\.ru|difunde la palabra|traducci[oó]n\s*por|sincronizado\s*por|edici[oó]n\s*audio\s*video|@\w+\.\w+|\bx\s*:\s*@\w+|www\.\S+\.(?:com|es|org|net|ru))/i.test(cleaned)) {
+                return '';
+            }
+            return cleaned;
+        }
+
+        function normalizeCueSignature(txt) {
+            return String(txt || '')
+                .toLowerCase()
+                .replace(/[¡!¿?.,;:"'«»()\[\]\-—…]/g, '')
+                .replace(/\s+/g, ' ')
                 .trim();
         }
 
@@ -10183,7 +10197,20 @@
             var cleaned = [];
             for (var i = 0; i < rawCues.length; i++) {
                 var c = rawCues[i];
-                var txt = cleanSubText(c.text);
+                // Deduplicar líneas repetidas dentro del mismo bloque de subtítulo (ej. "Hola\nHola")
+                var rawLines = String(c.text || '').split('\n');
+                var uniqueLines = [];
+                var seenLineSigs = {};
+                for (var k = 0; k < rawLines.length; k++) {
+                    var ln = cleanSubText(rawLines[k]);
+                    if (!ln) continue;
+                    var sig = normalizeCueSignature(ln);
+                    if (sig && !seenLineSigs[sig]) {
+                        seenLineSigs[sig] = true;
+                        uniqueLines.push(ln);
+                    }
+                }
+                var txt = uniqueLines.join('\n');
                 if (txt && c.end > c.start) {
                     cleaned.push({
                         start: c.start,
@@ -10201,17 +10228,31 @@
                 var cur = cleaned[j];
                 if (result.length > 0) {
                     var prev = result[result.length - 1];
+                    var prevSig = normalizeCueSignature(prev.text);
+                    var curSig = normalizeCueSignature(cur.text);
+
+                    // 1. Si dos subtítulos consecutivos dicen exactamente lo mismo (o uno contiene al otro) con < 2.5s de separación, fusionarlos en uno solo sin parpadeo ni eco
+                    if (prevSig && curSig && (prevSig === curSig || (prevSig.length > 8 && curSig.indexOf(prevSig) !== -1) || (curSig.length > 8 && prevSig.indexOf(curSig) !== -1)) && (cur.start - prev.end <= 2.5)) {
+                        prev.end = Math.max(prev.end, cur.end);
+                        prev.rawEnd = Math.max(prev.rawEnd, cur.rawEnd);
+                        if (cur.text.length > prev.text.length) prev.text = cur.text;
+                        continue;
+                    }
+
+                    // 2. Si se solapan en el tiempo siendo textos distintos, recortar limpiamente el anterior
                     if (prev.end > cur.start) {
-                        if (prev.text === cur.text) {
-                            prev.end = Math.max(prev.end, cur.end);
-                            prev.rawEnd = Math.max(prev.rawEnd, cur.rawEnd);
-                            continue;
-                        }
-                        var safeEnd = cur.start - 0.05;
-                        if (safeEnd <= prev.start + 0.2) {
-                            safeEnd = prev.start + 0.2;
-                            cur.start = safeEnd + 0.05;
-                            cur.rawStart = safeEnd + 0.05;
+                        var safeEnd = cur.start - 0.04;
+                        if (safeEnd <= prev.start + 0.25) {
+                            // Si estaban prácticamente en el mismo instante (bilingüe o doble pista interna), combinar en 2 líneas si son cortos o priorizar el más completo
+                            if (prev.text.indexOf(cur.text) === -1 && cur.text.indexOf(prev.text) === -1 && (prev.text.length + cur.text.length < 90)) {
+                                prev.text = prev.text + '\n' + cur.text;
+                                prev.end = Math.max(prev.end, cur.end);
+                                prev.rawEnd = Math.max(prev.rawEnd, cur.rawEnd);
+                                continue;
+                            }
+                            safeEnd = prev.start + 0.25;
+                            cur.start = safeEnd + 0.04;
+                            cur.rawStart = safeEnd + 0.04;
                         }
                         prev.end = safeEnd;
                         prev.rawEnd = safeEnd;
@@ -12194,9 +12235,14 @@
                         if (resData.status === 'ok' && resData.direct_stream_url) {
                             tmdbDirectStreamUrl = resData.direct_stream_url;
                             if (resData.subtitles) {
+                                const seenClientUrls = new Set();
                                 availableSpanishSubs = resData.subtitles.filter(sub => {
-                                    const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
-                                    return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('spn') || l.includes('castellano') || l.includes('español') || l.includes('spanish');
+                                    const code = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+                                    const isEs = /(?:^|[^a-z])(?:spa|spl|spn|es(?:-[a-z0-9]+)?|espa[ñn]ol|spanish|castellano|latino)(?:$|[^a-z])/i.test(code);
+                                    const key = sub.raw_url || sub.url;
+                                    if (!isEs || !key || seenClientUrls.has(key)) return false;
+                                    seenClientUrls.add(key);
+                                    return true;
                                 });
                             }
                             if (resData.sub_es && !currentCustomSub) {
@@ -12372,12 +12418,22 @@
                         maxMaxBufferLength: 240,
                         maxBufferSize: 60 * 1024 * 1024,
                         enableWorker: false,
-                        progressive: true
+                        progressive: true,
+                        renderTextTracksNatively: false
                     });
                     hlsPlayer.loadSource(tmdbDirectStreamUrl);
                     hlsPlayer.attachMedia(video);
                     hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+                        if (hlsPlayer) hlsPlayer.subtitleDisplay = false;
+                        enforceSpanishTracks(video);
                         video.play().catch(e => console.log('HLS play wait:', e));
+                    });
+                    hlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+                        if (hlsPlayer) {
+                            hlsPlayer.subtitleDisplay = false;
+                            hlsPlayer.subtitleTrack = -1;
+                        }
+                        enforceSpanishTracks(video);
                     });
                 } else {
                     video.src = tmdbDirectStreamUrl;
@@ -12653,19 +12709,16 @@
         }
 
         function enforceSpanishTracks(videoEl) {
+            // SOBERANO ANTI-DUPLICATION SHIELD:
+            // Todos los subtítulos se pintan en la capa DOM 'soberanoSubOverlay'.
+            // Jamás permitir que el navegador webOS ni Hls.js pinten pistas nativas encima (en italiano/inglés/duplicado).
+            if (hlsPlayer) {
+                hlsPlayer.subtitleDisplay = false;
+                if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
+            }
             if (!videoEl || !videoEl.textTracks) return;
-            let spanishFound = false;
             for (let i = 0; i < videoEl.textTracks.length; i++) {
-                const track = videoEl.textTracks[i];
-                const lang = (track.language || '').toLowerCase();
-                const label = (track.label || '').toLowerCase();
-                const isSpanish = lang.startsWith('es') || lang === 'spa' || label.includes('español') || label.includes('spanish');
-                if (isSpanish && !spanishFound && subtitlesEnabled) {
-                    track.mode = 'hidden';
-                    spanishFound = true;
-                } else {
-                    track.mode = 'disabled';
-                }
+                videoEl.textTracks[i].mode = 'disabled';
             }
         }
         if (typeof video !== 'undefined' && video) {
