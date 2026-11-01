@@ -12276,7 +12276,8 @@
                             // REGLA DE ORO LINGÜÍSTICA:
                             // Si el audio ya viene en Español (obra original o doblaje español), subtítulos OFF por defecto.
                             // Si el audio está en su idioma real (Inglés, Japonés, Francés, etc.), subtítulos ES ON por defecto.
-                            const hasSpanishAudio = (resData && resData.audio_es) || (item.original_language === 'es');
+                            const isStreamEnglish = (resData && resData.direct_stream_url && resData.direct_stream_url.toLowerCase().includes('the+awakening'));
+                            const hasSpanishAudio = !isStreamEnglish && ((resData && resData.audio_es) || (item.original_language === 'es'));
                             const btnSub = document.getElementById('btnSubToggle');
                             const txtSub = document.getElementById('subStatusText');
 

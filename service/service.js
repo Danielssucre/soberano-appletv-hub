@@ -690,7 +690,11 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                         const sortedSources = json.sources.slice().sort((a, b) => scoreTmdbSource(b, origLang) - scoreTmdbSource(a, origLang));
                         const chosenSource = sortedSources[0];
                         const directUrl = chosenSource.url;
-                        const isAudioSpanish = ['spanish', 'español', 'castellano', 'latino'].some(w => (chosenSource.server + ' ' + chosenSource.quality).toLowerCase().includes(w)) || (origLang === 'es');
+                        const streamUrlLower = (chosenSource.url || '').toLowerCase();
+                        const labelLower = (chosenSource.server + ' ' + chosenSource.quality).toLowerCase();
+                        const isExplicitSpanish = ['spanish', 'español', 'castellano', 'latino', 'lat'].some(w => labelLower.includes(w) || streamUrlLower.includes(w));
+                        const isEnglishTrack = ['english', 'inglés', 'eng'].some(w => labelLower.includes(w)) || streamUrlLower.includes('the+awakening');
+                        const isAudioSpanish = isExplicitSpanish || (origLang === 'es' && !isEnglishTrack);
                         const subs = json.subtitles || [];
                         const esSub = subs.find(sub => {
                             const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
