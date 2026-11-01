@@ -738,22 +738,27 @@ function resolveVixsrcStream(id, type, s, e) {
 }
 
 
-function fetchExternalOpenSubtitles(tmdbId, mediaType, s, e) {
+function isSpanishSubItem(sub) {
+    if (!sub) return false;
+    const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+    return l.includes('spa') || l.includes('spl') || l.includes('spn') || l.includes('castellano') || l.includes('español') || l.includes('spanish') || /\bes\b/.test(l) || l.startsWith('es');
+}
+
+function isEnglishSubItem(sub) {
+    if (!sub) return false;
+    const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+    return l.includes('eng') || l.includes('english') || /\ben\b/.test(l) || l.startsWith('en');
+}
+
+function fetchExternalOpenSubtitles(tmdbId, mediaType, s, e, reqHost = '127.0.0.1:9099') {
     return new Promise(async (resolve) => {
         try {
-            // 1. Obtener IMDB ID de TMDB
+            // 1. Obtener IMDB ID de TMDB (Node 8.12 compatible via fetchText)
             const extUrl = `https://nabby.pro/api/tmdb/${mediaType}/${tmdbId}/external_ids`;
             let imdbId = null;
             try {
-                const extData = await new Promise((res, rej) => {
-                    const req = https.get(extUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 3000 }, (r) => {
-                        let d = '';
-                        r.on('data', c => d += c);
-                        r.on('end', () => { try { res(JSON.parse(d)); } catch(er) { res({}); } });
-                    });
-                    req.on('error', () => res({}));
-                    req.on('timeout', () => { req.abort(); res({}); });
-                });
+                const extRaw = await fetchText(extUrl, {}, 3500);
+                const extData = JSON.parse(extRaw);
                 imdbId = extData.imdb_id;
             } catch(e) {}
 
@@ -763,40 +768,51 @@ function fetchExternalOpenSubtitles(tmdbId, mediaType, s, e) {
                 ? `https://opensubtitles-v3.strem.io/subtitles/series/${targetId}:${s}:${e}.json`
                 : `https://opensubtitles-v3.strem.io/subtitles/movie/${targetId}.json`;
 
-            const parsed = url.parse(osUrl);
-            const req = https.request({
-                hostname: parsed.hostname,
-                port: 443,
-                path: parsed.path,
-                method: 'GET',
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-                },
-                timeout: 3500
-            }, (res) => {
-                let data = '';
-                res.on('data', c => data += c);
-                res.on('end', () => {
-                    try {
-                        const json = JSON.parse(data);
-                        const rawSubs = json.subtitles || [];
-                        const formatted = rawSubs.map(s => ({
-                            url: s.url,
-                            label: `OpenSubtitles • ${s.lang || 'es'}`,
-                            lang: s.lang || 'es',
-                            language: s.lang || 'es',
-                            format: 'vtt',
-                            source: 'opensubtitles'
-                        }));
-                        resolve(formatted);
-                    } catch(err) { resolve([]); }
-                });
+            const data = await fetchText(osUrl, {}, 4000);
+            const json = JSON.parse(data);
+            const rawSubs = json.subtitles || [];
+            let esCounter = 1;
+            const formatted = rawSubs.map((sub, idx) => {
+                const code = (sub.lang || '').toLowerCase();
+                const isEs = ['spa', 'spl', 'spn', 'es'].includes(code) || code.includes('spa') || code.includes('es');
+                let label = `OpenSubtitles • ${sub.lang || 'sub'}`;
+                if (isEs) {
+                    const region = code === 'spl' ? 'Latino' : (code === 'spn' ? 'España' : 'Oficial');
+                    label = `⚡ Español ${region} #${esCounter++} (OpenSubtitles CF)`;
+                }
+                const proxiedUrl = `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`;
+                return {
+                    url: proxiedUrl,
+                    raw_url: sub.url,
+                    label: label,
+                    lang: isEs ? 'es' : (sub.lang || 'en'),
+                    language: isEs ? 'es' : (sub.lang || 'en'),
+                    format: 'vtt',
+                    source: 'opensubtitles',
+                    priority: isEs ? (code === 'spl' ? 100 : 95) - idx : 10
+                };
             });
-            req.on('error', () => resolve([]));
-            req.on('timeout', () => { req.abort(); resolve([]); });
-            req.end();
+            resolve(formatted);
         } catch(ex) { resolve([]); }
     });
+}
+
+function rewriteSubHost(data, reqHost) {
+    if (!data) return data;
+    const out = Object.assign({}, data);
+    if (out.sub_es && out.sub_es.includes('/api/sub_')) {
+        out.sub_es = out.sub_es.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`);
+    }
+    if (Array.isArray(out.subtitles)) {
+        out.subtitles = out.subtitles.map(s => {
+            const copy = Object.assign({}, s);
+            if (copy.url && copy.url.includes('/api/sub_')) {
+                copy.url = copy.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`);
+            }
+            return copy;
+        });
+    }
+    return out;
 }
 
 function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en') {
@@ -804,7 +820,7 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
     const now = Date.now();
     const cached = TMDB_STREAM_CACHE.get(cacheKey);
     if (cached && (now - cached.ts < 7200000)) {
-        return Promise.resolve(decorateWithAligned(cached.data, id, type, s, e, reqHost));
+        return Promise.resolve(decorateWithAligned(rewriteSubHost(cached.data, reqHost), id, type, s, e, reqHost));
     }
 
     return new Promise((resolve) => {
@@ -821,6 +837,9 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
             },
             timeout: 8000
         };
+
+        // Lanzar federación de OpenSubtitles en paralelo desde el milisegundo 0
+        const osPromise = fetchExternalOpenSubtitles(id, type, s, e, reqHost).catch(() => []);
 
         const req = https.request(opts, (res) => {
             let data = '';
@@ -851,24 +870,49 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                         const isExplicitSpanish = ['spanish', 'español', 'castellano', 'latino', 'lat'].some(w => labelLower.includes(w) || streamUrlLower.includes(w));
                         const isEnglishTrack = ['english', 'inglés', 'eng'].some(w => labelLower.includes(w)) || streamUrlLower.includes('the+awakening');
                         const isAudioSpanish = isExplicitSpanish || (origLang === 'es' && !isEnglishTrack);
-                        let subs = json.subtitles || [];
-                        let esSub = subs.find(sub => {
-                            const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
-                            return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('castellano');
-                        });
-                        if (!esSub) {
-                            try {
-                                const osSubs = await fetchExternalOpenSubtitles(id, type, s, e);
-                                if (osSubs && osSubs.length > 0) {
-                                    subs = subs.concat(osSubs);
-                                    esSub = subs.find(sub => {
-                                        const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
-                                        return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('castellano');
-                                    });
-                                }
-                            } catch(eOs) {}
-                        }
 
+                        // Unificar subtítulos de OpenSubtitles (Cloudflare <50ms) + Framex (respaldo)
+                        const osSubs = await osPromise;
+                        const rawFramexSubs = (json.subtitles || []).map((sub, idx) => {
+                            const isEs = isSpanishSubItem(sub);
+                            const rawUrl = sub.url || '';
+                            const proxied = rawUrl.startsWith('http://127.0.0.1') ? rawUrl : `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(rawUrl)}`;
+                            return {
+                                url: proxied,
+                                raw_url: rawUrl,
+                                label: sub.label || (isEs ? `Español Servidor #${idx + 1}` : (sub.lang || 'Sub')),
+                                lang: isEs ? 'es' : (sub.lang || sub.language || 'en'),
+                                language: isEs ? 'es' : (sub.language || sub.lang || 'en'),
+                                format: 'vtt',
+                                source: 'framex',
+                                priority: isEs ? 50 - idx : 5
+                            };
+                        });
+
+                        // Priorizar OpenSubtitles CF primero (nunca da timeout como cache.vdrk.site)
+                        let subs = osSubs.concat(rawFramexSubs);
+                        const esSubsList = subs.filter(isSpanishSubItem);
+                        let esSub = esSubsList.length > 0 ? esSubsList[0] : null;
+
+                        // Si no existe ningún subtítulo en español pero sí en inglés, activar Traductor Neuronal On-The-Fly ($0)
+                        if (!esSub) {
+                            const enSub = subs.find(isEnglishSubItem) || subs[0];
+                            if (enSub && (enSub.raw_url || enSub.url)) {
+                                const srcSubUrl = enSub.raw_url || enSub.url;
+                                const transUrl = `http://${reqHost}/api/sub_translate?url=${encodeURIComponent(srcSubUrl)}`;
+                                const neuralTrack = {
+                                    url: transUrl,
+                                    label: '🧠 Español (Traducción Neuronal Automática)',
+                                    lang: 'es',
+                                    language: 'es',
+                                    format: 'vtt',
+                                    source: 'neural_translator',
+                                    priority: 80
+                                };
+                                subs.unshift(neuralTrack);
+                                esSub = neuralTrack;
+                            }
+                        }
 
                         const result = {
                             status: 'ok',
@@ -887,8 +931,6 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                         };
                         const topScore = scoreTmdbSource(sortedSources[0], origLang);
                         if (topScore <= -500) {
-                            // Todas las fuentes de Framex están contaminadas con doblajes de la India.
-                            // Ejecutar failover automático a VixSrc (Audio Original en Inglés).
                             console.log(`[AUDIO SHIELD] Fuentes de Framex contaminadas para ${id} (${type}). Conmutando a VixSrc VO...`);
                             resolveVixsrcStream(id, type, s, e).then(vixData => {
                                 if (vixData) {
@@ -897,7 +939,6 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                                     TMDB_STREAM_CACHE.set(cacheKey, { data: vixData, ts: now });
                                     return resolve(decorateWithAligned(vixData, id, type, s, e, reqHost));
                                 }
-                                // Si no hay VixSrc, usar la fuente elegida
                                 TMDB_STREAM_CACHE.set(cacheKey, { data: result, ts: now });
                                 return resolve(decorateWithAligned(result, id, type, s, e, reqHost));
                             });
@@ -905,6 +946,16 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                         }
                         TMDB_STREAM_CACHE.set(cacheKey, { data: result, ts: now });
                         return resolve(decorateWithAligned(result, id, type, s, e, reqHost));
+                    }
+                    // Si Framex no tuvo fuentes (ej. serie exclusiva), intentar VixSrc + OpenSubtitles
+                    const osSubsFallback = await osPromise;
+                    const vixFallback = await resolveVixsrcStream(id, type, s, e);
+                    if (vixFallback) {
+                        const esSubFb = osSubsFallback.find(isSpanishSubItem);
+                        vixFallback.subtitles = osSubsFallback;
+                        vixFallback.sub_es = esSubFb ? esSubFb.url : null;
+                        TMDB_STREAM_CACHE.set(cacheKey, { data: vixFallback, ts: now });
+                        return resolve(decorateWithAligned(vixFallback, id, type, s, e, reqHost));
                     }
                     resolve({ status: 'fallback', id: id, type: type, message: 'No direct sources found' });
                 } catch(err) {
@@ -1297,7 +1348,7 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
-    // 8.1 Subtitle Proxy Endpoint (CORS-free for webOS)
+    // 8.1 Subtitle Proxy & SRT-to-WebVTT Transcoder Endpoint (CORS-free + Zero-Desync for webOS)
     if (parsed.pathname === '/api/sub_proxy') {
         const subUrl = parsed.query.url;
         if (!subUrl) {
@@ -1305,15 +1356,89 @@ const server = http.createServer(async (req, res) => {
             return res.end('Missing url');
         }
         try {
-            const vttText = await fetchText(subUrl);
+            let rawSub = await fetchText(subUrl, {}, 5000);
+            rawSub = rawSub.replace(/^\uFEFF/, '').replace(/\r/g, '');
+            // Limpiar artefactos de citas y etiquetas ASS/SSA
+            rawSub = rawSub.replace(/\[\s*(?:cite|cita)\s*[:：]?\s*\d+\s*\]/gi, '')
+                           .replace(/\b(?:cite|cita)\s*[:：]?\s*\d+\b/gi, '')
+                           .replace(/\{\\[^}]*\}/g, '');
+            // Convertir marcas de tiempo SRT (00:00:14,139) a WebVTT estándar (00:00:14.139)
+            rawSub = rawSub.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+                           .replace(/(\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+            if (!/^\s*WEBVTT/i.test(rawSub)) {
+                rawSub = 'WEBVTT\n\n' + rawSub;
+            }
             res.writeHead(200, {
                 'Content-Type': 'text/vtt; charset=utf-8',
+                'Cache-Control': 'public, max-age=7200',
                 'Access-Control-Allow-Origin': '*'
             });
-            return res.end(vttText);
+            return res.end(rawSub);
         } catch(e) {
             res.writeHead(502, { 'Content-Type': 'text/plain' });
             return res.end('Sub proxy error: ' + e.message);
+        }
+    }
+
+    // 8.4 On-The-Fly Neural Subtitle Translator ($0.00 USD GTX Batch Engine)
+    // Si una serie/película nueva solo tiene subtítulos en inglés/otro idioma, los traduce al español al vuelo
+    if (parsed.pathname === '/api/sub_translate') {
+        const subUrl = parsed.query.url;
+        if (!subUrl) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            return res.end('Missing url');
+        }
+        try {
+            let rawSub = await fetchText(subUrl, {}, 5500);
+            rawSub = rawSub.replace(/^\uFEFF/, '').replace(/\r/g, '')
+                           .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+                           .replace(/\{\\[^}]*\}/g, '');
+            const blocks = rawSub.split(/\n\n+/);
+            const cues = [];
+            for (let b of blocks) {
+                const lines = b.trim().split('\n');
+                let tsIdx = -1;
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].includes('-->')) { tsIdx = i; break; }
+                }
+                if (tsIdx !== -1) {
+                    const tsLine = lines[tsIdx];
+                    const txt = lines.slice(tsIdx + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+                    if (txt) cues.push({ ts: tsLine, text: txt });
+                }
+            }
+            // Traducir por lotes de ~35 líneas en paralelo usando GTX ($0 API)
+            const batchSize = 35;
+            const batches = [];
+            for (let i = 0; i < Math.min(cues.length, 700); i += batchSize) {
+                batches.push(cues.slice(i, i + batchSize));
+            }
+            await Promise.all(batches.map(async (batch) => {
+                try {
+                    const joined = batch.map(c => c.text).join('\n');
+                    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
+                    const gRaw = await fetchText(gUrl, {}, 4500);
+                    const gJson = JSON.parse(gRaw);
+                    const fullTrans = (gJson[0] || []).map(x => x[0] || '').join('');
+                    const transLines = fullTrans.split('\n');
+                    for (let j = 0; j < batch.length; j++) {
+                        if (transLines[j]) batch[j].text = transLines[j].trim();
+                    }
+                } catch(eTrans) {}
+            }));
+            let outVtt = 'WEBVTT\n\n';
+            for (let c of cues) {
+                outVtt += `${c.ts}\n${c.text}\n\n`;
+            }
+            res.writeHead(200, {
+                'Content-Type': 'text/vtt; charset=utf-8',
+                'Cache-Control': 'public, max-age=86400',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(outVtt);
+        } catch(e) {
+            res.writeHead(502, { 'Content-Type': 'text/plain' });
+            return res.end('Sub translate error: ' + e.message);
         }
     }
 

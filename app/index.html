@@ -10227,7 +10227,7 @@
         function parseVTT(vttText) {
             var raw = [];
             if (!vttText) return raw;
-            var lines = vttText.replace(/\r/g, '').split('\n');
+            var lines = vttText.replace(/^\uFEFF/, '').replace(/\r/g, '').split('\n');
             var i = 0;
             while (i < lines.length) {
                 var line = lines[i].trim();
@@ -10238,7 +10238,11 @@
                     i++;
                     var textLines = [];
                     while (i < lines.length && lines[i].trim() !== '') {
-                        var t = cleanSubText(lines[i].trim());
+                        var rawLine = lines[i].trim();
+                        if (/^\d+$/.test(rawLine) && (i + 1 < lines.length) && lines[i + 1].indexOf('-->') !== -1) {
+                            break;
+                        }
+                        var t = cleanSubText(rawLine);
                         if (t) textLines.push(t);
                         i++;
                     }
@@ -10246,14 +10250,16 @@
                     if (start !== null && end !== null && text) {
                         raw.push({ start: start, end: end, rawStart: start, rawEnd: end, text: text });
                     }
+                } else {
+                    i++;
                 }
-                i++;
             }
             return sanitizeAndDeduplicateCues(raw);
         }
 
         function parseTimestamp(ts) {
             if (!ts) return null;
+            ts = ts.replace(',', '.').trim();
             const parts = ts.split(':');
             try {
                 if (parts.length === 3) {
@@ -12164,6 +12170,7 @@
 
             recordTmdbHistory(item, type, season, episode);
 
+            let resolvedDataObj = null;
             try {
                 showToast('⚡ Conectando stream nativo en RAM (0 Anuncios)...');
                 availableSpanishSubs = [];
@@ -12172,6 +12179,7 @@
                     const resResp = await fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=${type}&s=${s}&e=${e}&orig_lang=${encodeURIComponent(item.original_language || 'en')}`);
                     if (resResp.ok) {
                         const resData = await resResp.json();
+                        resolvedDataObj = resData;
                         if (resData.status === 'cinema_exclusive') {
                             showToast('🎬 ' + (resData.message || 'Película exclusiva de cines. No disponible en digital aún.'));
                             alert('🎬 Exclusiva en Cines:\n\n' + resData.message);
@@ -12182,8 +12190,8 @@
                             tmdbDirectStreamUrl = resData.direct_stream_url;
                             if (resData.subtitles) {
                                 availableSpanishSubs = resData.subtitles.filter(sub => {
-                                    const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
-                                    return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('castellano');
+                                    const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+                                    return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('spn') || l.includes('castellano') || l.includes('español') || l.includes('spanish');
                                 });
                             }
                             if (resData.sub_es && !currentCustomSub) {
@@ -12211,11 +12219,14 @@
                             const bestSource = sortedSources[0];
                             tmdbDirectStreamUrl = bestSource.url;
                             console.log('[SOBERANO CLIENT] Fuente seleccionada con curaduría de audio:', bestSource.server, bestSource.quality);
-                            const esSub = (fData.subtitles || []).find(sub => {
-                                const l = (sub.lang || sub.language || sub.label || '').toLowerCase();
-                                return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('castellano');
+                            const esSubs = (fData.subtitles || []).filter(sub => {
+                                const l = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+                                return l.includes('es') || l.includes('spa') || l.includes('spl') || l.includes('spn') || l.includes('castellano') || l.includes('español') || l.includes('spanish');
                             });
-                            if (esSub && !currentCustomSub) currentCustomSub = esSub.url;
+                            if (esSubs.length > 0) {
+                                availableSpanishSubs = esSubs;
+                                if (!currentCustomSub) currentCustomSub = esSubs[0].url;
+                            }
                         }
                     }
                 }
@@ -12263,27 +12274,66 @@
                     subOverlayEl.innerHTML = '';
                 }
 
-                if (currentCustomSub) {
-                    // Cargar VTT en el motor overlay visual (soberanoSubOverlay)
-                    fetch(encodeURI(currentCustomSub))
-                        .then(r => {
-                            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                            return r.text();
-                        })
-                        .then(vttText => {
-                            currentSubCues = parseVTT(vttText);
+                // Construir cola resiliente de subtítulos (Auto-Failover en Cascada)
+                const subCandidates = [];
+                if (currentCustomSub) subCandidates.push({ url: currentCustomSub, label: 'Principal' });
+                if (availableSpanishSubs && availableSpanishSubs.length > 0) {
+                    availableSpanishSubs.forEach((sObj, idx) => {
+                        if (sObj.url && !subCandidates.some(c => c.url === sObj.url)) {
+                            subCandidates.push({ url: sObj.url, label: sObj.label || `Español #${idx + 1}`, index: idx });
+                        }
+                    });
+                }
+
+                if (subCandidates.length > 0) {
+                    (async () => {
+                        let loadedCues = [];
+                        let loadedIdx = 0;
+                        for (let i = 0; i < subCandidates.length; i++) {
+                            const cand = subCandidates[i];
+                            try {
+                                const ctrl = new AbortController();
+                                const timer = setTimeout(() => ctrl.abort(), 4500);
+                                let targetSubUrl = cand.url;
+                                // Si no pasa ya por el proxy local, enrutar por /api/sub_proxy para evitar bloqueos CORS/SRT
+                                if (PROXY_BASE && !targetSubUrl.includes('/api/sub_proxy') && !targetSubUrl.includes('/api/sub_translate') && !targetSubUrl.includes('/subtitles/')) {
+                                    targetSubUrl = `${PROXY_BASE}/api/sub_proxy?url=${encodeURIComponent(targetSubUrl)}`;
+                                }
+                                const r = await fetch(targetSubUrl, { signal: ctrl.signal });
+                                clearTimeout(timer);
+                                if (!r.ok) continue;
+                                const vttText = await r.text();
+                                const parsed = parseVTT(vttText);
+                                if (parsed && parsed.length >= 5) {
+                                    loadedCues = parsed;
+                                    loadedIdx = (typeof cand.index === 'number') ? cand.index : i;
+                                    currentCustomSub = targetSubUrl;
+                                    break;
+                                }
+                            } catch(eSub) {
+                                console.warn(`[SOBERANO SUB FAILOVER] Falló pista ${i + 1} (${cand.label}), probando siguiente...`, eSub.message);
+                            }
+                        }
+
+                        if (loadedCues.length > 0) {
+                            currentSubCues = loadedCues;
+                            currentSpanishSubIndex = loadedIdx;
+                            const trackText = document.getElementById('subTrackText');
+                            if (trackText && availableSpanishSubs.length > 1) {
+                                trackText.textContent = `Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length}`;
+                            }
                             if (currentSubSyncOffset !== 0.0) {
                                 currentSubCues.forEach(c => {
                                     c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
                                     c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
                                 });
                             }
-                            
+
                             // REGLA DE ORO LINGÜÍSTICA:
                             // Si el audio ya viene en Español (obra original o doblaje español), subtítulos OFF por defecto.
                             // Si el audio está en su idioma real (Inglés, Japonés, Francés, etc.), subtítulos ES ON por defecto.
-                            const isStreamEnglish = (resData && resData.direct_stream_url && resData.direct_stream_url.toLowerCase().includes('the+awakening'));
-                            const hasSpanishAudio = !isStreamEnglish && ((resData && resData.audio_es) || (item.original_language === 'es'));
+                            const isStreamEnglish = (resolvedDataObj && resolvedDataObj.direct_stream_url && resolvedDataObj.direct_stream_url.toLowerCase().includes('the+awakening'));
+                            const hasSpanishAudio = !isStreamEnglish && ((resolvedDataObj && resolvedDataObj.audio_es) || (item.original_language === 'es'));
                             const btnSub = document.getElementById('btnSubToggle');
                             const txtSub = document.getElementById('subStatusText');
 
@@ -12300,10 +12350,10 @@
                                 if (txtSub) txtSub.textContent = 'ES';
                                 console.log(`[SOBERANO SUB] Idioma original (${item.original_language || 'VO'}). Subtítulos en español ACTIVADOS: ${currentSubCues.length} líneas.`);
                             }
-                        })
-                        .catch(err => {
-                            console.warn('[SOBERANO SUB] Error cargando VTT overlay:', err);
-                        });
+                        } else {
+                            console.warn('[SOBERANO SUB] Ninguna pista candidata devolvió subtítulos válidos.');
+                        }
+                    })();
                 }
 
                 if (tmdbAligning) startAlignmentPolling(item, type, s, e);
@@ -12555,26 +12605,46 @@
                 showToast('Sólo hay 1 pista de subtítulos en español disponible');
                 return;
             }
-            currentSpanishSubIndex = (currentSpanishSubIndex + 1) % availableSpanishSubs.length;
-            const targetSub = availableSpanishSubs[currentSpanishSubIndex];
-            showToast(`Cambiando a Pista ${currentSpanishSubIndex + 1}: ${targetSub.label || 'Español'}...`);
-            try {
-                const r = await fetch(targetSub.url);
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                const vtt = await r.text();
-                currentSubCues = parseVTT(vtt);
-                if (currentSubSyncOffset !== 0.0) {
-                    currentSubCues.forEach(c => {
-                        c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
-                        c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
-                    });
+            for (let attempt = 0; attempt < availableSpanishSubs.length; attempt++) {
+                currentSpanishSubIndex = (currentSpanishSubIndex + 1) % availableSpanishSubs.length;
+                const targetSub = availableSpanishSubs[currentSpanishSubIndex];
+                showToast(`Cambiando a Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length}: ${targetSub.label || 'Español'}...`);
+                try {
+                    let targetSubUrl = targetSub.url;
+                    if (PROXY_BASE && !targetSubUrl.includes('/api/sub_proxy') && !targetSubUrl.includes('/api/sub_translate') && !targetSubUrl.includes('/subtitles/')) {
+                        targetSubUrl = `${PROXY_BASE}/api/sub_proxy?url=${encodeURIComponent(targetSubUrl)}`;
+                    }
+                    const ctrl = new AbortController();
+                    const timer = setTimeout(() => ctrl.abort(), 4500);
+                    const r = await fetch(targetSubUrl, { signal: ctrl.signal });
+                    clearTimeout(timer);
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const vtt = await r.text();
+                    const parsed = parseVTT(vtt);
+                    if (!parsed || parsed.length < 5) throw new Error('Pista vacía');
+                    currentSubCues = parsed;
+                    if (currentSubSyncOffset !== 0.0) {
+                        currentSubCues.forEach(c => {
+                            c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
+                            c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
+                        });
+                    }
+                    subtitlesEnabled = true;
+                    const subOverlayEl = document.getElementById('soberanoSubOverlay');
+                    if (subOverlayEl) subOverlayEl.style.display = 'flex';
+                    const btnSub = document.getElementById('btnSubToggle');
+                    if (btnSub) btnSub.classList.add('active-sub');
+                    const txtSub = document.getElementById('subStatusText');
+                    if (txtSub) txtSub.textContent = 'ES';
+                    const trackText = document.getElementById('subTrackText');
+                    if (trackText) trackText.textContent = `Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length}`;
+                    showToast(`✅ Pista ${currentSpanishSubIndex + 1} activa (${currentSubCues.length} subtítulos)`);
+                    return;
+                } catch(e) {
+                    console.warn(`Error en pista ${currentSpanishSubIndex + 1}:`, e.message);
                 }
-                const trackText = document.getElementById('subTrackText');
-                if (trackText) trackText.textContent = `Pista ${currentSpanishSubIndex + 1}`;
-                showToast(`✅ Pista ${currentSpanishSubIndex + 1} cargada (${currentSubCues.length} subtítulos)`);
-            } catch(e) {
-                showToast('Error cambiando pista: ' + e.message);
             }
+            showToast('⚠️ No se encontraron más pistas operativas');
         }
 
         function enforceSpanishTracks(videoEl) {
