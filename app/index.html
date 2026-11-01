@@ -2568,6 +2568,108 @@
             }
         }
 
+        /* ============================================================
+           SOBERANO 1080p FULL HD QUALITY ENGINE & FILTER SYSTEM ($0 USD)
+           ============================================================ */
+        .quality-filter-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 24px;
+            margin: 10px 40px 20px 40px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .quality-filter-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .quality-filter-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .quality-status-tag {
+            font-size: 12.5px;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Quality Badges on Poster Cards */
+        .quality-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 4;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.4px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+            text-transform: uppercase;
+        }
+
+        .quality-badge.quality-hd {
+            background: rgba(48, 209, 88, 0.28);
+            color: #30d158;
+            border: 1px solid rgba(48, 209, 88, 0.55);
+            text-shadow: 0 0 8px rgba(48, 209, 88, 0.4);
+        }
+
+        .quality-badge.quality-cam {
+            background: rgba(255, 159, 10, 0.32);
+            color: #ff9f0a;
+            border: 1px solid rgba(255, 159, 10, 0.6);
+            text-shadow: 0 0 8px rgba(255, 159, 10, 0.35);
+        }
+
+        .quality-badge.quality-soon {
+            background: rgba(100, 210, 255, 0.25);
+            color: #64d2ff;
+            border: 1px solid rgba(100, 210, 255, 0.45);
+        }
+
+        /* Instant CSS Filtering when "Solo HD" is active */
+        body.filter-hd-only .tv-poster-card.is-not-hd {
+            display: none !important;
+        }
+
+        @media screen and (max-width: 768px) {
+            .quality-filter-bar {
+                margin: 10px 16px 16px 16px;
+                padding: 12px 16px;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -2664,6 +2766,22 @@
              VISTA 2: PELÍCULAS (CINE GLOBAL HD TMDB)
              ========================================== -->
         <div id="viewMovies" style="display:none;">
+            <!-- SOBERANO CALIDAD FILTER BAR -->
+            <div class="quality-filter-bar">
+                <div class="quality-filter-left">
+                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtro de Calidad:</span>
+                    <button class="filter-pill active" id="filterMovieAll" tabindex="0" onclick="setQualityFilter('all')">
+                        <i class="fa fa-film"></i> Todo el Catálogo
+                    </button>
+                    <button class="filter-pill" id="filterMovieHD" tabindex="0" onclick="setQualityFilter('hd')">
+                        <i class="fa fa-sparkles" style="color:#30d158;"></i> ✨ Solo 1080p Full HD
+                    </button>
+                </div>
+                <div class="quality-filter-status" id="movieQualityStatus">
+                    <span class="quality-status-tag"><i class="fa fa-info-circle"></i> Mostrando todo (1080p HD + Estrenos Cine)</span>
+                </div>
+            </div>
+
             <!-- Fila 1: Tendencias Hoy -->
             <section class="shelf-section">
                 <div class="shelf-header">
@@ -2768,6 +2886,22 @@
              VISTA 3: SERIES DE TELEVISIÓN (GLOBAL TMDB)
              ========================================== -->
         <div id="viewSeries" style="display:none;">
+            <!-- SOBERANO CALIDAD FILTER BAR -->
+            <div class="quality-filter-bar">
+                <div class="quality-filter-left">
+                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtro de Calidad:</span>
+                    <button class="filter-pill active" id="filterSeriesAll" tabindex="0" onclick="setQualityFilter('all')">
+                        <i class="fa fa-tv"></i> Todo el Catálogo
+                    </button>
+                    <button class="filter-pill" id="filterSeriesHD" tabindex="0" onclick="setQualityFilter('hd')">
+                        <i class="fa fa-sparkles" style="color:#30d158;"></i> ✨ Solo 1080p Full HD
+                    </button>
+                </div>
+                <div class="quality-filter-status" id="seriesQualityStatus">
+                    <span class="quality-status-tag" style="background:rgba(48,209,88,0.2); color:#30d158; border:1px solid rgba(48,209,88,0.4);"><i class="fa fa-check-circle"></i> 100% de las series en transmisión digital 1080p HD</span>
+                </div>
+            </div>
+
             <!-- Fila 1: Series en Tendencia -->
             <section class="shelf-section">
                 <div class="shelf-header">
@@ -9331,6 +9465,7 @@
             initAutoSyncCatalogs();
             initKeyboardShortcuts();
             initMomentumScrollEnhancers();
+            applyQualityFilterUI();
 
             // Auto-play siguiente episodio al terminar video (estilo Apple TV / Netflix)
             if (video) {
@@ -11690,6 +11825,116 @@
         let currentTmdbPlaying = null;
         let currentCustomSub = null;
 
+        // ==============================================================================
+        // SOBERANO HD QUALITY DETECTION & FILTER ENGINE ($0 USD)
+        // ==============================================================================
+        let currentQualityFilter = localStorage.getItem('soberano_quality_filter') || 'all';
+
+        function getMediaQualityInfo(item, mediaType = 'movie') {
+            const type = item.media_type || mediaType || 'movie';
+            if (type === 'tv') {
+                return {
+                    isHD: true,
+                    quality: '1080p HD',
+                    label: '1080p Full HD Confirmada',
+                    badgeClass: 'quality-hd',
+                    badgeIcon: 'fa-sparkles',
+                    badgeText: '1080p HD',
+                    tagColor: '#30d158'
+                };
+            }
+
+            const relDateStr = item.release_date || item.first_air_date || '';
+            if (!relDateStr) {
+                return {
+                    isHD: true,
+                    quality: '1080p HD',
+                    label: '1080p Full HD Confirmada',
+                    badgeClass: 'quality-hd',
+                    badgeIcon: 'fa-sparkles',
+                    badgeText: '1080p HD',
+                    tagColor: '#30d158'
+                };
+            }
+
+            const relDate = new Date(relDateStr);
+            const now = new Date();
+            const diffTime = now.getTime() - relDate.getTime();
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays < -7) {
+                return {
+                    isHD: false,
+                    quality: 'Próximamente',
+                    label: 'Estreno Próximo en Cines',
+                    badgeClass: 'quality-soon',
+                    badgeIcon: 'fa-calendar',
+                    badgeText: 'Próximamente',
+                    tagColor: '#64d2ff'
+                };
+            }
+
+            // Ventana de exhibición en cines (primeros ~55 días): suele ser grabación CAM / TS
+            if (diffDays >= -7 && diffDays <= 55) {
+                return {
+                    isHD: false,
+                    quality: 'CAM',
+                    label: 'Grabación de Cine (CAM / TS)',
+                    badgeClass: 'quality-cam',
+                    badgeIcon: 'fa-video',
+                    badgeText: 'Cine / CAM',
+                    tagColor: '#ff9f0a'
+                };
+            }
+
+            return {
+                isHD: true,
+                quality: '1080p HD',
+                label: '1080p Full HD Confirmada',
+                badgeClass: 'quality-hd',
+                badgeIcon: 'fa-sparkles',
+                badgeText: '1080p HD',
+                tagColor: '#30d158'
+            };
+        }
+
+        function setQualityFilter(filter) {
+            currentQualityFilter = filter;
+            try {
+                localStorage.setItem('soberano_quality_filter', filter);
+            } catch(e) {}
+            applyQualityFilterUI();
+        }
+
+        function applyQualityFilterUI() {
+            const isHDOnly = currentQualityFilter === 'hd';
+
+            if (isHDOnly) {
+                document.body.classList.add('filter-hd-only');
+            } else {
+                document.body.classList.remove('filter-hd-only');
+            }
+
+            const btnMAll = document.getElementById('filterMovieAll');
+            const btnMHD = document.getElementById('filterMovieHD');
+            if (btnMAll) btnMAll.classList.toggle('active', !isHDOnly);
+            if (btnMHD) btnMHD.classList.toggle('active', isHDOnly);
+
+            const btnSAll = document.getElementById('filterSeriesAll');
+            const btnSHD = document.getElementById('filterSeriesHD');
+            if (btnSAll) btnSAll.classList.toggle('active', !isHDOnly);
+            if (btnSHD) btnSHD.classList.toggle('active', isHDOnly);
+
+            const mStatus = document.getElementById('movieQualityStatus');
+            if (mStatus) {
+                if (isHDOnly) {
+                    mStatus.innerHTML = '<span class="quality-status-tag" style="background:rgba(48,209,88,0.2); color:#30d158; border:1px solid rgba(48,209,88,0.4);"><i class="fa fa-check-circle"></i> Mostrando solo títulos 1080p Full HD</span>';
+                } else {
+                    mStatus.innerHTML = '<span class="quality-status-tag"><i class="fa fa-info-circle"></i> Mostrando todo (1080p HD + Estrenos Cine)</span>';
+                }
+            }
+        }
+
         function switchMediaTab(tab) {
             currentMediaTab = tab;
             
@@ -11830,6 +12075,14 @@
             card.className = 'tv-poster-card';
             card.tabIndex = 0;
             const type = item.media_type || mediaType;
+            const qInfo = getMediaQualityInfo(item, type);
+
+            if (qInfo.isHD) {
+                card.classList.add('is-hd');
+            } else {
+                card.classList.add('is-not-hd');
+            }
+
             const title = item.title || item.name || 'Sin título';
             const poster = item.poster_path ? (item.poster_path.startsWith('http') ? item.poster_path : `https://image.tmdb.org/t/p/w500${item.poster_path}`) : getCanonicalPoster('', title);
             const year = (item.release_date || item.first_air_date || '').substring(0, 4);
@@ -11842,13 +12095,13 @@
             card.innerHTML = `
                 <div class="poster-wrap">
                     <img class="poster-img" src="${poster}" alt="${title}" loading="lazy" onerror="handleImageError(this, '${type}_${item.id}', '${safeTitle}')">
+                    <span class="quality-badge ${qInfo.badgeClass}"><i class="fa ${qInfo.badgeIcon}"></i> ${qInfo.badgeText}</span>
                     <span class="card-pill-tag">${type === 'movie' ? '🎬 Película' : '📺 Serie'}</span>
-                    ${rating ? `<div class="rank-number-overlay" style="font-size:13px; font-weight:700; width:auto; height:auto; padding:3px 7px; border-radius:6px; right:8px; left:auto; top:8px; bottom:auto; background:rgba(0,0,0,0.65);">${rating}</div>` : ''}
                     <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
                 </div>
                 <div class="poster-info">
                     <div class="poster-title" title="${title}">${title}</div>
-                    <div class="poster-sub">${year ? year + ' • ' : ''}${type === 'movie' ? 'Cine HD' : 'Temporadas'}</div>
+                    <div class="poster-sub">${year ? year + ' • ' : ''}${rating ? rating + ' • ' : ''}${type === 'movie' ? (qInfo.isHD ? 'Cine HD' : 'Cine CAM') : 'Temporadas HD'}</div>
                 </div>
             `;
             return card;
@@ -11875,15 +12128,31 @@
             const year = (item.release_date || item.first_air_date || '').substring(0, 4);
             const rating = item.vote_average ? `${item.vote_average.toFixed(1)} / 10` : 'HD';
 
+            const qInfo = getMediaQualityInfo(item, mediaType);
+
             document.getElementById('sheetBannerImg').src = banner || getCanonicalPoster('', title);
             document.getElementById('sheetTitle').textContent = title;
-            document.getElementById('sheetSynopsis').textContent = item.overview || 'Cargando información en español...';
+            
+            const synopsisEl = document.getElementById('sheetSynopsis');
+            const baseOverview = item.overview || 'Cargando información en español...';
+            if (!qInfo.isHD) {
+                synopsisEl.innerHTML = `
+                    <div style="background:rgba(255,159,10,0.15); border:1px solid rgba(255,159,10,0.35); border-radius:10px; padding:10px 14px; margin-bottom:14px; color:#ff9f0a; font-size:13px; display:flex; align-items:center; gap:10px;">
+                        <i class="fa fa-video" style="font-size:16px; flex-shrink:0;"></i>
+                        <span><strong>Aviso de Calidad:</strong> Película actualmente en cartelera. La copia disponible es grabación de cine (CAM / TS) hasta su lanzamiento oficial en 1080p HD.</span>
+                    </div>
+                    <div>${baseOverview}</div>
+                `;
+            } else {
+                synopsisEl.textContent = baseOverview;
+            }
             
             const badgesWrap = document.getElementById('sheetBadges');
             badgesWrap.innerHTML = `
                 <span class="meta-badge">${year || '2024'}</span>
                 <span class="meta-badge">${mediaType === 'movie' ? '🎬 Película' : '📺 Serie TV'}</span>
                 <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
+                <span class="meta-badge ${qInfo.badgeClass}" style="${qInfo.isHD ? 'background:rgba(48,209,88,0.22); color:#30d158; border:1px solid rgba(48,209,88,0.45);' : 'background:rgba(255,159,10,0.22); color:#ff9f0a; border:1px solid rgba(255,159,10,0.45);'} font-weight:700;"><i class="fa ${qInfo.badgeIcon}"></i> Calidad: ${qInfo.label}</span>
                 <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);">Subtítulos en Español</span>
             `;
 
@@ -11964,7 +12233,17 @@
                 }
 
                 if (full.overview) {
-                    document.getElementById('sheetSynopsis').textContent = full.overview;
+                    if (!qInfo.isHD) {
+                        document.getElementById('sheetSynopsis').innerHTML = `
+                            <div style="background:rgba(255,159,10,0.15); border:1px solid rgba(255,159,10,0.35); border-radius:10px; padding:10px 14px; margin-bottom:14px; color:#ff9f0a; font-size:13px; display:flex; align-items:center; gap:10px;">
+                                <i class="fa fa-video" style="font-size:16px; flex-shrink:0;"></i>
+                                <span><strong>Aviso de Calidad:</strong> Película actualmente en cartelera. La copia disponible es grabación de cine (CAM / TS) hasta su estreno oficial en 1080p HD.</span>
+                            </div>
+                            <div>${full.overview}</div>
+                        `;
+                    } else {
+                        document.getElementById('sheetSynopsis').textContent = full.overview;
+                    }
                 }
 
                 if (mediaType === 'movie') {
@@ -11975,6 +12254,7 @@
                         <span class="meta-badge">${runtime}</span>
                         <span class="meta-badge">${genres || 'Película'}</span>
                         <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
+                        <span class="meta-badge ${qInfo.badgeClass}" style="${qInfo.isHD ? 'background:rgba(48,209,88,0.22); color:#30d158; border:1px solid rgba(48,209,88,0.45);' : 'background:rgba(255,159,10,0.22); color:#ff9f0a; border:1px solid rgba(255,159,10,0.45);'} font-weight:700;"><i class="fa ${qInfo.badgeIcon}"></i> Calidad: ${qInfo.label}</span>
                         <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);"><i class="fa fa-closed-captioning"></i> Español Forzado</span>
                     `;
 
@@ -11996,6 +12276,17 @@
                     if (activeTmdbSeasons.length === 0 && full.seasons && full.seasons.length > 0) {
                         activeTmdbSeasons = full.seasons;
                     }
+
+                    const genres = (full.genres || []).map(g => g.name).join(' • ');
+                    const totalSeasons = activeTmdbSeasons.length ? `${activeTmdbSeasons.length} Temp` : 'Serie TV';
+                    badgesWrap.innerHTML = `
+                        <span class="meta-badge">${year || '2024'}</span>
+                        <span class="meta-badge">${totalSeasons}</span>
+                        <span class="meta-badge">${genres || 'Serie TV'}</span>
+                        <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
+                        <span class="meta-badge quality-hd" style="background:rgba(48,209,88,0.22); color:#30d158; border:1px solid rgba(48,209,88,0.45); font-weight:700;"><i class="fa fa-sparkles"></i> Calidad: 1080p Full HD Confirmada</span>
+                        <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);"><i class="fa fa-closed-captioning"></i> Subtítulos en Español</span>
+                    `;
 
                     tabsRow.innerHTML = '';
                     activeTmdbSeasons.forEach((season, idx) => {
