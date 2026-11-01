@@ -593,8 +593,8 @@ function isCorruptedSubFile(p) {
 
 function decorateWithAligned(data, id, type, s, e, reqHost) {
     if (!data || data.status !== 'ok') return data;
-    // Si la pista ya viene en Español nativo (Cuevana3c Latino / Castellano), suprimir subtítulos
-    if (data.audio_es) {
+    // Si el contenido proviene de Cuevana3c (Latino o Inglés Subtitulado), suprimir subtítulos externos (los subtítulos ya vienen integrados en el video)
+    if (data.server && data.server.includes('Cuevana3c')) {
         return Object.assign({}, data, { aligned: false, sub_es: null, subtitles: [] });
     }
     const out = Object.assign({}, data);
@@ -705,7 +705,7 @@ function unpackPackedJS(packedStr) {
     return p;
 }
 
-async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expectedOrigTitle) {
+async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expectedOrigTitle, origLang = 'en') {
     try {
         let titles = [expectedTitle, expectedOrigTitle].filter(Boolean);
         let yearTarget = null;
@@ -717,6 +717,7 @@ async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expe
                 if (tmdbJson.name) titles.push(tmdbJson.name);
                 if (tmdbJson.original_title) titles.push(tmdbJson.original_title);
                 if (tmdbJson.original_name) titles.push(tmdbJson.original_name);
+                if (tmdbJson.original_language) origLang = tmdbJson.original_language;
                 const dateStr = tmdbJson.release_date || tmdbJson.first_air_date || '';
                 if (dateStr) yearTarget = dateStr.slice(0, 4);
             } catch(e) {}
@@ -783,39 +784,67 @@ async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expe
 
         const tabRegex = /<li class="tab-video-item">([\s\S]*?)(?=<li class="tab-video-item">|<\/ul>\s*<\/div>)/g;
         let tabMatch;
-        let selectedToken = null;
-        let selectedLang = 'Español';
+        const parsedTabs = [];
 
         while ((tabMatch = tabRegex.exec(contentHtml)) !== null) {
             const tabBlock = tabMatch[1];
-            const isLatino = /latino|lat\.png/i.test(tabBlock);
-            const isCastellano = /castellano|cas\.png/i.test(tabBlock);
-            
-            if (isLatino || isCastellano) {
-                const tokenMatch = tabBlock.match(/data-server="https:\/\/tungtungsahur\.cuevana3c\.pro\/\?token=([^"]+)"/);
-                if (tokenMatch) {
-                    selectedToken = tokenMatch[1];
-                    selectedLang = isLatino ? 'Latino' : 'Castellano';
-                    break;
-                }
+            const nameMatch = tabBlock.match(/<div class="tab-item-name">\s*([^<]+)/);
+            const imgMatch = tabBlock.match(/<img[^>]+src="?([^"\s>]+)/);
+            const tName = nameMatch ? nameMatch[1].trim() : '';
+            const tImg = imgMatch ? imgMatch[1].trim() : '';
+            const combined = (tName + ' ' + tImg).toLowerCase();
+
+            const tokenMatch = tabBlock.match(/data-server="https:\/\/tungtungsahur\.cuevana3c\.pro\/\?token=([^"]+)"/);
+            const token = tokenMatch ? tokenMatch[1] : null;
+
+            const isSub = /subtitulado|ingl[eé]s|sub\.png|\bvo\b/.test(combined);
+            const isEs = /latino|castellano|español|lat\.png|cas\.png/.test(combined);
+
+            parsedTabs.push({
+                name: tName,
+                token: token,
+                isSub: isSub,
+                isEs: isEs
+            });
+        }
+
+        // PREFERENCIA LINGÜÍSTICA CONFIGURADA:
+        // Si el idioma original es diferente al español (origLang !== 'es', ej. en, ja, ko, fr):
+        // Preferir de forma predeterminada servidor en inglés con subtítulos en español (isSub).
+        // Respaldo a audio en español (isEs) si la obra no cuenta con pestaña subtitulada.
+        // Si la obra es originaria en español (origLang === 'es'), preferir audio nativo en español (isEs).
+        let chosenTab = null;
+        const isForeign = (origLang || 'en').toLowerCase() !== 'es';
+
+        if (isForeign) {
+            chosenTab = parsedTabs.find(t => t.isSub && t.token);
+            if (!chosenTab) {
+                chosenTab = parsedTabs.find(t => t.isEs && t.token);
+            }
+        } else {
+            chosenTab = parsedTabs.find(t => t.isEs && t.token);
+            if (!chosenTab) {
+                chosenTab = parsedTabs.find(t => t.isSub && t.token);
             }
         }
 
-        if (!selectedToken) {
-            const anyTokenMatch = contentHtml.match(/data-server="https:\/\/tungtungsahur\.cuevana3c\.pro\/\?token=([^"]+)"/);
-            if (anyTokenMatch) {
-                selectedToken = anyTokenMatch[1];
-                selectedLang = 'Audio';
-            }
+        if (!chosenTab && parsedTabs.length > 0) {
+            chosenTab = parsedTabs.find(t => t.token);
         }
 
-        if (!selectedToken) {
+        if (!chosenTab || !chosenTab.token) {
             console.log(`[CUEVANA] No se encontraron tokens válidos en ${targetContentUrl}`);
             return null;
         }
 
+        const selectedToken = chosenTab.token;
+        const isSubtitulado = chosenTab.isSub;
+        const selectedLangLabel = isSubtitulado 
+            ? 'Inglés (Subtitulado Español)' 
+            : (chosenTab.name || (chosenTab.isEs ? 'Español' : 'Audio'));
+
         const embedUrl = decryptCuevanaToken(selectedToken);
-        console.log(`[CUEVANA] Token desencriptado (${selectedLang}): ${embedUrl}`);
+        console.log(`[CUEVANA] Token desencriptado (${selectedLangLabel}): ${embedUrl}`);
         if (!embedUrl) return null;
 
         if (embedUrl.includes('ikhjerbhye3wjkhoduh5xiczuvd.lol') || embedUrl.includes('lkhjerbhye3wjkhodvh5xlczuvd.lol')) {
@@ -826,7 +855,7 @@ async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expe
                 const m3u8Match = unpacked.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]+/);
                 if (m3u8Match) {
                     const directM3u8 = m3u8Match[0];
-                    console.log(`[CUEVANA SUCCESS] Stream m3u8 nativo obtenido en Español ${selectedLang}:`, directM3u8);
+                    console.log(`[CUEVANA SUCCESS] Stream m3u8 obtenido (${selectedLangLabel}):`, directM3u8);
                     return {
                         status: 'ok',
                         id: id,
@@ -836,8 +865,8 @@ async function resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expe
                         direct_stream_url: directM3u8,
                         quality: '1080p',
                         format: 'hls',
-                        server: `Cuevana3c ${selectedLang} HD`,
-                        audio_es: true,
+                        server: `Cuevana3c ${selectedLangLabel} HD`,
+                        audio_es: !isSubtitulado,
                         sub_es: null,
                         subtitles: []
                     };
@@ -862,7 +891,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
 
     // CUEVANA3C NATIVE: Exclusivo y único motor para Películas y Series (Español Latino / Castellano HD nativo)
     try {
-        const cuevanaStream = await resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expectedOrigTitle);
+        const cuevanaStream = await resolveCuevanaStream(id, type, s, e, reqHost, expectedTitle, expectedOrigTitle, origLang);
         if (cuevanaStream && cuevanaStream.status === 'ok' && cuevanaStream.direct_stream_url) {
             TMDB_STREAM_CACHE.set(cacheKey, { data: cuevanaStream, ts: now });
             return decorateWithAligned(cuevanaStream, id, type, s, e, reqHost);
