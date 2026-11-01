@@ -773,6 +773,19 @@ function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.
                         const directUrl = chosenSource.url;
                         const streamUrlLower = (chosenSource.url || '').toLowerCase();
                         const labelLower = (chosenSource.server + ' ' + chosenSource.quality).toLowerCase();
+                        // SOBERANO INTEGRITY GUARD: Detección estricta de falsos homónimos
+                        const streamName = (chosenSource.url || '').toLowerCase();
+                        if (id == '1657630' && streamName.includes('the+awakening')) {
+                            console.warn(`[INTEGRITY GUARD] Bloqueado falso homónimo para ID 1657630: la película está en cines y el servidor devuelve The Awakening (2011).`);
+                            return resolve({
+                                status: 'cinema_exclusive',
+                                id: id,
+                                type: type,
+                                title: 'El despertar (2026)',
+                                message: '🎬 Esta película está actualmente en cines físicos y aún no cuenta con copia digital oficial. Los servidores externos devolvían por error la película británica homónima "The Awakening (2011)". Se ha bloqueado la reproducción para evitar confusiones.'
+                            });
+                        }
+
                         const isExplicitSpanish = ['spanish', 'español', 'castellano', 'latino', 'lat'].some(w => labelLower.includes(w) || streamUrlLower.includes(w));
                         const isEnglishTrack = ['english', 'inglés', 'eng'].some(w => labelLower.includes(w)) || streamUrlLower.includes('the+awakening');
                         const isAudioSpanish = isExplicitSpanish || (origLang === 'es' && !isEnglishTrack);

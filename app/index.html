@@ -12172,6 +12172,12 @@
                     const resResp = await fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=${type}&s=${s}&e=${e}&orig_lang=${encodeURIComponent(item.original_language || 'en')}`);
                     if (resResp.ok) {
                         const resData = await resResp.json();
+                        if (resData.status === 'cinema_exclusive') {
+                            showToast('🎬 ' + (resData.message || 'Película exclusiva de cines. No disponible en digital aún.'));
+                            alert('🎬 Exclusiva en Cines:\n\n' + resData.message);
+                            closePlayer();
+                            return;
+                        }
                         if (resData.status === 'ok' && resData.direct_stream_url) {
                             tmdbDirectStreamUrl = resData.direct_stream_url;
                             if (resData.subtitles) {
