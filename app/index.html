@@ -11495,7 +11495,11 @@
         }
 
         function openEpisodesFromPlayer() {
-            if (activeAnime) openDetailsSheet(activeAnime);
+            if (currentTmdbPlaying && currentTmdbPlaying.item) {
+                openTmdbDetailsSheet(currentTmdbPlaying.item, currentTmdbPlaying.item.media_type || 'tv');
+            } else if (activeAnime) {
+                openDetailsSheet(activeAnime);
+            }
         }
 
         function closePlayer() {
