@@ -1354,27 +1354,40 @@
             display: flex;
             gap: 10px;
             overflow-x: auto;
-            padding-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+            padding: 8px 4px 12px 4px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            scrollbar-width: none;
+        }
+        .season-tabs-row::-webkit-scrollbar {
+            display: none;
         }
 
         .season-tab {
-            background: transparent;
-            border: none;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             color: var(--text-secondary);
             font-size: 14px;
             font-weight: 600;
-            padding: 8px 16px;
+            padding: 9px 18px;
             border-radius: 12px;
             cursor: pointer;
             white-space: nowrap;
-            transition: all 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            flex-shrink: 0;
+            touch-action: manipulation;
+        }
+
+        .season-tab:active {
+            transform: scale(0.96);
         }
 
         .season-tab.active {
-            background: rgba(255, 255, 255, 0.15);
-            color: #ffffff;
+            background: rgba(14, 165, 233, 0.25);
+            border-color: rgba(14, 165, 233, 0.6);
+            color: #38bdf8;
             font-weight: 700;
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.25);
         }
 
         .episodes-list {
@@ -12859,7 +12872,7 @@
                     const totalSeasons = activeTmdbSeasons.length ? `${activeTmdbSeasons.length} Temp` : 'Serie TV';
                     badgesWrap.innerHTML = `
                         <span class="meta-badge">${year || '2024'}</span>
-                        <span class="meta-badge">${totalSeasons}</span>
+                        <span class="meta-badge" id="badgeTotalSeasons" style="cursor:pointer;" onclick="scrollSheetToSeasonTabs()" title="Ir a temporadas">${totalSeasons} <i class="fa fa-angle-down" style="margin-left:3px;"></i></span>
                         <span class="meta-badge">${genres || 'Serie TV'}</span>
                         <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
                         <span class="meta-badge quality-hd" style="background:rgba(48,209,88,0.22); color:#30d158; border:1px solid rgba(48,209,88,0.45); font-weight:700;"><i class="fa fa-sparkles"></i> Calidad: 1080p Full HD Confirmada</span>
@@ -12870,8 +12883,13 @@
                     activeTmdbSeasons.forEach((season, idx) => {
                         const btn = document.createElement('button');
                         btn.className = `season-tab ${idx === 0 ? 'active' : ''}`;
+                        btn.setAttribute('type', 'button');
                         btn.textContent = season.name || `Temporada ${season.season_number}`;
-                        btn.onclick = () => selectTmdbSeason(season.season_number, btn);
+                        btn.onclick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            selectTmdbSeason(season.season_number, btn);
+                        };
                         tabsRow.appendChild(btn);
                     });
 
@@ -12884,11 +12902,26 @@
             }
         }
 
+        function scrollSheetToSeasonTabs() {
+            const tabs = document.getElementById('seasonTabsRow');
+            if (tabs) {
+                tabs.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
         async function selectTmdbSeason(seasonNum, tabBtn = null) {
             activeTmdbSeasonNum = seasonNum;
             if (tabBtn) {
                 document.querySelectorAll('#seasonTabsRow .season-tab').forEach(b => b.classList.remove('active'));
                 tabBtn.classList.add('active');
+            } else {
+                const autoBtn = document.querySelectorAll('#seasonTabsRow .season-tab');
+                if (autoBtn && autoBtn.length > 0) {
+                    autoBtn.forEach(b => {
+                        if (b.textContent.includes(String(seasonNum))) b.classList.add('active');
+                        else b.classList.remove('active');
+                    });
+                }
             }
             const listContainer = document.getElementById('sheetEpisodesList');
             listContainer.innerHTML = '<div style="color:var(--text-muted); padding:30px; text-align:center;"><i class="fa fa-spinner fa-spin fa-2x"></i><p style="margin-top:10px;">Cargando episodios de Temporada ' + seasonNum + '...</p></div>';
