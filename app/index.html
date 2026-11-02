@@ -2663,10 +2663,258 @@
             display: none !important;
         }
 
-        @media screen and (max-width: 768px) {
+        /* ========================================================
+           SOBERANO CLOUDFLARE MOBILE OPTIMIZATIONS (iOS / ANDROID)
+           ======================================================== */
+        @media screen and (max-width: 768px), (pointer: coarse) and (max-width: 900px) {
+            body {
+                -webkit-tap-highlight-color: transparent;
+                overscroll-behavior-y: none;
+            }
+
+            /* Top header compact on mobile */
+            header.appletv-header {
+                padding: 10px 16px !important;
+                height: auto !important;
+                min-height: 52px !important;
+            }
+
+            header.appletv-header .header-brand .brand-pill {
+                display: none;
+            }
+
+            header.appletv-header .header-nav {
+                display: none !important;
+            }
+
+            /* Bottom Tab Bar visible and thumb-friendly */
+            .mobile-tab-bar {
+                display: flex !important;
+                background: rgba(10, 14, 22, 0.92) !important;
+                backdrop-filter: blur(25px) saturate(180%) !important;
+                -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
+                border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+                height: calc(58px + env(safe-area-inset-bottom, 16px)) !important;
+                padding-bottom: env(safe-area-inset-bottom, 16px) !important;
+                z-index: 9999 !important;
+            }
+
+            .mobile-tab-item {
+                color: rgba(255, 255, 255, 0.6) !important;
+                font-size: 11px !important;
+                font-weight: 600 !important;
+            }
+
+            .mobile-tab-item.active {
+                color: #38bdf8 !important;
+            }
+
+            .mobile-tab-item i {
+                font-size: 20px !important;
+            }
+
+            main.appletv-main {
+                padding-bottom: calc(85px + env(safe-area-inset-bottom, 20px)) !important;
+            }
+
+            /* Hero Showcase compact on mobile */
+            .hero-container {
+                height: 380px !important;
+                min-height: 360px !important;
+                padding: 16px !important;
+            }
+
+            .hero-title {
+                font-size: 24px !important;
+                line-height: 1.2 !important;
+            }
+
+            .hero-synopsis {
+                -webkit-line-clamp: 2 !important;
+                font-size: 12.5px !important;
+            }
+
+            /* Quality Filter Bar compact for mobile thumb */
             .quality-filter-bar {
-                margin: 10px 16px 16px 16px;
-                padding: 12px 16px;
+                margin: 10px 14px 16px 14px !important;
+                padding: 12px 14px !important;
+                border-radius: 14px !important;
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 10px !important;
+            }
+
+            .quality-filter-left {
+                width: 100% !important;
+                display: flex !important;
+                justify-content: space-between !important;
+                gap: 8px !important;
+            }
+
+            .quality-filter-left .filter-pill {
+                flex: 1 !important;
+                text-align: center !important;
+                padding: 9px 12px !important;
+                font-size: 12.5px !important;
+                border-radius: 12px !important;
+            }
+
+            .quality-status-tag {
+                font-size: 11.5px !important;
+                padding: 5px 10px !important;
+                width: 100% !important;
+                justify-content: center !important;
+            }
+
+            /* Shelves and Poster Cards touch scroll */
+            .shelf-section {
+                margin-bottom: 24px !important;
+                padding: 0 14px !important;
+            }
+
+            .shelf-header {
+                margin-bottom: 10px !important;
+            }
+
+            .shelf-title {
+                font-size: 17px !important;
+            }
+
+            .shelf-track-container {
+                margin: 0 -14px !important;
+                padding: 0 14px !important;
+            }
+
+            .shelf-track {
+                gap: 10px !important;
+                scroll-padding-left: 14px !important;
+            }
+
+            .shelf-arrow {
+                display: none !important;
+            }
+
+            .tv-poster-card {
+                flex: 0 0 135px !important;
+                border-radius: 10px !important;
+            }
+
+            .poster-wrap {
+                height: 195px !important;
+                border-radius: 10px 10px 0 0 !important;
+            }
+
+            .poster-info {
+                padding: 8px 10px !important;
+            }
+
+            .poster-title {
+                font-size: 12px !important;
+            }
+
+            .poster-sub {
+                font-size: 11px !important;
+            }
+
+            /* Catalog Grid on Mobile */
+            .catalog-grid {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 10px !important;
+                padding: 0 14px !important;
+            }
+
+            /* Details Sheet as iOS Bottom Sheet */
+            .sheet-overlay {
+                padding: 0 !important;
+                align-items: flex-end !important;
+            }
+
+            .sheet-modal {
+                width: 100vw !important;
+                max-width: 100vw !important;
+                height: 92vh !important;
+                max-height: 92vh !important;
+                border-radius: 24px 24px 0 0 !important;
+                border-bottom: none !important;
+                border-left: none !important;
+                border-right: none !important;
+                box-shadow: 0 -12px 50px rgba(0, 0, 0, 0.9) !important;
+            }
+
+            .sheet-header-banner {
+                height: 180px !important;
+                border-radius: 24px 24px 0 0 !important;
+            }
+
+            .sheet-close-btn {
+                top: 14px !important;
+                right: 14px !important;
+                width: 36px !important;
+                height: 36px !important;
+                font-size: 15px !important;
+            }
+
+            .sheet-body {
+                padding: 16px 16px calc(24px + env(safe-area-inset-bottom, 20px)) 16px !important;
+            }
+
+            .sheet-title {
+                font-size: 22px !important;
+            }
+
+            .sheet-meta-badges {
+                gap: 6px !important;
+            }
+
+            .meta-badge {
+                font-size: 11px !important;
+                padding: 4px 10px !important;
+            }
+
+            /* Search Modal on Mobile */
+            .search-modal-container {
+                width: 100vw !important;
+                max-width: 100vw !important;
+                height: 100vh !important;
+                max-height: 100vh !important;
+                border-radius: 0 !important;
+                padding: calc(16px + env(safe-area-inset-top, 20px)) 16px calc(80px + env(safe-area-inset-bottom, 20px)) 16px !important;
+            }
+
+            /* Player Controls on Mobile */
+            .player-bottom-controls {
+                padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 16px)) 14px !important;
+            }
+
+            .controls-toolbar {
+                flex-wrap: wrap !important;
+                gap: 8px !important;
+            }
+
+            .right-controls {
+                flex-wrap: wrap !important;
+                gap: 6px !important;
+            }
+
+            .remote-colors-legend {
+                display: none !important;
+            }
+
+            .sub-sync-group {
+                margin-left: 0 !important;
+            }
+
+            .btn-ctrl {
+                min-height: 40px !important;
+                padding: 6px 10px !important;
+                font-size: 12px !important;
+            }
+
+            .btn-ctrl.btn-airplay {
+                background: rgba(14, 165, 233, 0.22) !important;
+                border-color: rgba(14, 165, 233, 0.5) !important;
+                color: #38bdf8 !important;
+                font-weight: 700 !important;
             }
         }
 
@@ -3031,6 +3279,14 @@
                             <!-- Lista de Episodios -->
                             <button class="btn-ctrl" id="btnListEps" onclick="openEpisodesFromPlayer()" title="Lista de Episodios">
                                 <i class="fa fa-list"></i> Episodios
+                            </button>
+
+                            <!-- AirPlay Nativo (Apple TV / iOS Safari) -->
+                            <button class="btn-ctrl btn-airplay" id="btnAirPlay" onclick="triggerAirPlay()" title="Transmitir con AirPlay" style="display:none;">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:middle; margin-right:4px;">
+                                    <path d="M6 17h12l-6-6zM4 19h16v2H4z"/>
+                                </svg>
+                                <span>AirPlay</span>
                             </button>
 
                             <!-- Subtítulos Español CC -->
@@ -9466,6 +9722,8 @@
             initKeyboardShortcuts();
             initMomentumScrollEnhancers();
             applyQualityFilterUI();
+            initAirPlay();
+            initMobilePlayerTouchGestures();
 
             // Auto-play siguiente episodio al terminar video (estilo Apple TV / Netflix)
             if (video) {
@@ -9490,6 +9748,72 @@
             }
             setInterval(update, 1000);
             update();
+        }
+
+        // ==========================================
+        // SOBERANO AIRPLAY & MOBILE ENGINE ($0 USD)
+        // ==========================================
+        function initAirPlay() {
+            const vid = document.getElementById('nativeVideo');
+            const btn = document.getElementById('btnAirPlay');
+            if (!vid || !btn) return;
+
+            if (window.WebKitPlaybackTargetAvailabilityEvent) {
+                vid.addEventListener('webkitplaybacktargetavailabilitychanged', (event) => {
+                    if (event.availability === 'available') {
+                        btn.style.display = 'inline-flex';
+                    } else {
+                        btn.style.display = 'none';
+                    }
+                });
+            } else if (typeof vid.webkitShowPlaybackTargetPicker === 'function') {
+                btn.style.display = 'inline-flex';
+            }
+        }
+
+        function triggerAirPlay() {
+            const vid = document.getElementById('nativeVideo');
+            if (vid && typeof vid.webkitShowPlaybackTargetPicker === 'function') {
+                vid.webkitShowPlaybackTargetPicker();
+            } else {
+                showToast('AirPlay activo para Safari en iPhone, iPad y Mac');
+            }
+        }
+
+        let lastTouchTime = 0;
+        let lastTouchX = 0;
+        function initMobilePlayerTouchGestures() {
+            const playerModal = document.getElementById('playerModal');
+            if (!playerModal) return;
+
+            playerModal.addEventListener('touchstart', (e) => {
+                if (e.target.closest('.player-bottom-controls') || e.target.closest('.player-header-osd') || e.target.closest('.sheet-server-picker') || e.target.closest('button')) {
+                    return;
+                }
+
+                const now = Date.now();
+                const tapInterval = now - lastTouchTime;
+                const touch = e.changedTouches[0];
+                const touchX = touch.clientX;
+                const screenWidth = window.innerWidth;
+
+                if (tapInterval < 320 && tapInterval > 0) {
+                    e.preventDefault();
+                    if (touchX < screenWidth * 0.38) {
+                        seekRelative(-10);
+                        showToast('⏪ -10s');
+                    } else if (touchX > screenWidth * 0.62) {
+                        seekRelative(10);
+                        showToast('⏩ +10s');
+                    } else {
+                        togglePlayPause();
+                    }
+                } else {
+                    handlePlayerUserActivity();
+                }
+                lastTouchTime = now;
+                lastTouchX = touchX;
+            }, { passive: false });
         }
 
         // ==========================================
