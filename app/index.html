@@ -11178,6 +11178,38 @@
                     tabsRow.appendChild(btn);
                 });
                 renderSheetEpisodes(anime.seasons[0].episodes);
+
+                // AUTO-SYNC DE CATÁLOGO EN VIVO: Verificar si han salido episodios nuevos en JKanime para series de la Bóveda
+                const vaultSlug = getCanonicalSlug(anime.slug || anime.id, anime.title);
+                if (PROXY_BASE && vaultSlug && vaultSlug !== 'ninku') {
+                    fetch(`${PROXY_BASE}/api/anime?slug=${encodeURIComponent(vaultSlug)}`)
+                        .then(r => r.json())
+                        .then(liveData => {
+                            if (!liveData || !liveData.episodes_count || activeAnime !== anime) return;
+                            const lastSeasonIdx = anime.seasons.length - 1;
+                            const lastSeason = anime.seasons[lastSeasonIdx];
+                            const currentMaxEp = lastSeason && lastSeason.episodes && lastSeason.episodes.length > 0
+                                ? Math.max(...lastSeason.episodes.map(e => e.episode || 0))
+                                : 0;
+                            if (liveData.episodes_count > currentMaxEp && lastSeason && lastSeason.episodes) {
+                                for (let newEp = currentMaxEp + 1; newEp <= liveData.episodes_count; newEp++) {
+                                    lastSeason.episodes.push({
+                                        episode: newEp,
+                                        title: `Episodio ${newEp} (Estreno)`,
+                                        duration_sec: 1440,
+                                        servers: [{ url: `https://jkanime.net/${vaultSlug}/${newEp}/`, type: 'scrape' }]
+                                    });
+                                }
+                                const lastTab = tabsRow.querySelector(`.season-tab[data-season="${lastSeasonIdx}"]`);
+                                if (lastTab) {
+                                    lastTab.innerHTML = `${lastSeason.name || `Temporada ${lastSeasonIdx + 1}`} <span class="tab-ep-count">${lastSeason.episodes.length} eps</span>`;
+                                }
+                                if (activeSeasonIndex === lastSeasonIdx) {
+                                    renderSheetEpisodes(lastSeason.episodes);
+                                }
+                            }
+                        }).catch(() => {});
+                }
             } else {
                 renderSheetEpisodes([]);
             }
@@ -13369,19 +13401,26 @@
                         </div>
                     `;
                 } else {
-                    activeTmdbSeasons = (full.seasons || []).filter(s => s.season_number > 0);
+                    // Filtrar temporadas válidas (> 0) y excluir temporadas futuras aún sin episodios (episode_count === 0)
+                    activeTmdbSeasons = (full.seasons || []).filter(s => s.season_number > 0 && (s.episode_count === undefined || s.episode_count > 0));
                     if (activeTmdbSeasons.length === 0 && full.seasons && full.seasons.length > 0) {
-                        activeTmdbSeasons = full.seasons;
+                        activeTmdbSeasons = full.seasons.filter(s => s.season_number > 0);
+                        if (activeTmdbSeasons.length === 0) activeTmdbSeasons = full.seasons;
                     }
 
                     const genres = (full.genres || []).map(g => g.name).join(' • ');
                     const totalSeasonsCount = activeTmdbSeasons.length;
                     const totalSeasons = totalSeasonsCount ? `${totalSeasonsCount} Temporadas` : 'Serie TV';
+                    const lastEpAir = full.last_episode_to_air;
+                    const airingBadge = (full.in_production && lastEpAir)
+                        ? `<span class="meta-badge" style="background:rgba(56,189,248,0.18); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); font-weight:700;"><i class="fa fa-satellite-dish"></i> Al Día: T${lastEpAir.season_number}•E${lastEpAir.episode_number}</span>`
+                        : '';
 
                     // Badges limpios e informativos
                     badgesWrap.innerHTML = `
                         <span class="meta-badge">${year || '2024'}</span>
                         <span class="meta-badge"><i class="fa fa-layer-group" style="color:#38bdf8;"></i> ${totalSeasons}</span>
+                        ${airingBadge}
                         <span class="meta-badge">${genres || 'Serie TV'}</span>
                         <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
                         <span class="meta-badge quality-hd" style="background:rgba(48,209,88,0.22); color:#30d158; border:1px solid rgba(48,209,88,0.45); font-weight:700;"><i class="fa fa-sparkles"></i> Calidad: 1080p Full HD Confirmada</span>
@@ -13394,11 +13433,21 @@
                     const countBadge = document.getElementById('seasonCountBadge');
                     if (countBadge) countBadge.textContent = `${totalSeasonsCount} Disponibles`;
 
+                    // Si el usuario ya estaba viendo una temporada específica de esta serie, abrir esa temporada automáticamente
+                    let initialSeasonNum = activeTmdbSeasons.length > 0 ? activeTmdbSeasons[0].season_number : 1;
+                    try {
+                        const savedHist = getPlaybackHistory() || [];
+                        const prevEntry = savedHist.find(h => h.isTmdb && String(h.tmdbId) === String(item.id) && h.season);
+                        if (prevEntry && activeTmdbSeasons.some(s => s.season_number === Number(prevEntry.season))) {
+                            initialSeasonNum = Number(prevEntry.season);
+                        }
+                    } catch(eH) {}
+
                     // Poblar Solapas Horizontales (ÚNICO control de temporadas, 1 solo toque)
                     tabsRow.innerHTML = '';
-                    activeTmdbSeasons.forEach((season, idx) => {
+                    activeTmdbSeasons.forEach((season) => {
                         const btn = document.createElement('button');
-                        btn.className = `season-tab ${idx === 0 ? 'active' : ''}`;
+                        btn.className = `season-tab ${season.season_number === initialSeasonNum ? 'active' : ''}`;
                         btn.setAttribute('type', 'button');
                         btn.dataset.season = season.season_number;
                         btn.innerHTML = `${season.name || 'Temporada ' + season.season_number}${season.episode_count ? ` <span class="tab-ep-count">${season.episode_count} eps</span>` : ''}`;
@@ -13411,7 +13460,7 @@
                     });
 
                     if (activeTmdbSeasons.length > 0) {
-                        selectTmdbSeason(activeTmdbSeasons[0].season_number);
+                        selectTmdbSeason(initialSeasonNum);
                     }
                 }
             } catch(err) {
@@ -13445,9 +13494,15 @@
                         runtime: 45
                     }));
                 } else {
-                    const resp = await fetch(`${PROXY_BASE}/api/tmdb/tv/${activeTmdbItem.id}/season/${seasonNum}?language=es-ES`);
+                    const resp = await fetch(`${PROXY_BASE}/api/tmdb/tv/${activeTmdbItem.id}/season/${seasonNum}?language=es-MX`);
                     const seasonData = await resp.json();
                     eps = seasonData.episodes || [];
+                    // Fallback a idioma original si una temporada recién estrenada aún no tiene traducción en TMDB
+                    if (eps.length === 0) {
+                        const respEn = await fetch(`${PROXY_BASE}/api/tmdb/tv/${activeTmdbItem.id}/season/${seasonNum}?language=en-US`);
+                        const seasonDataEn = await respEn.json();
+                        eps = seasonDataEn.episodes || [];
+                    }
                 }
                 listContainer.innerHTML = '';
 
@@ -13456,6 +13511,11 @@
                     return;
                 }
 
+                // Actualizar conteo real de episodios en la solapa activa
+                const activeTabEl = document.querySelector(`#seasonTabsRow .season-tab[data-season="${seasonNum}"] .tab-ep-count`);
+                if (activeTabEl) activeTabEl.textContent = `${eps.length} eps`;
+
+                const nowMs = Date.now();
                 eps.forEach(ep => {
                     const card = document.createElement('div');
                     card.className = 'ep-row-card';
@@ -13469,13 +13529,23 @@
                         launchTmdbPlayback(activeTmdbItem, seasonNum, ep.episode_number, srv);
                     };
                     const stillImg = ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : '';
+                    let statusBadgeHtml = '';
+                    if (ep.air_date) {
+                        const airMs = new Date(ep.air_date).getTime();
+                        const diffDays = (nowMs - airMs) / 86400000;
+                        if (diffDays >= -1 && diffDays <= 14) {
+                            statusBadgeHtml = `<span style="background:#30d158; color:#000; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle;">NUEVO</span>`;
+                        } else if (diffDays < -1) {
+                            statusBadgeHtml = `<span style="background:rgba(255,159,10,0.2); color:#ff9f0a; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle;">Estreno: ${ep.air_date}</span>`;
+                        }
+                    }
                     card.innerHTML = `
                         <div class="ep-row-left" style="display:flex; align-items:center; gap:16px; flex:1; min-width:0;">
                             <span class="ep-num-pill" style="min-width:44px; text-align:center; font-size:15px;">E${ep.episode_number}</span>
                             ${stillImg ? `<img src="${stillImg}" style="width:110px; height:62px; object-fit:cover; border-radius:8px; flex-shrink:0;" alt="Still" onerror="this.style.display=\'none\'">` : ''}
                             <div style="flex:1; min-width:0; padding-right:16px;">
-                                <div class="ep-name-title" style="font-weight:700; font-size:15px; color:#fff; white-space:normal; line-height:1.3;">${ep.name || `Episodio ${ep.episode_number}`}</div>
-                                <div style="font-size:13px; color:var(--text-muted); margin-top:4px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${ep.overview || 'Sinopsis no disponible.'}</div>
+                                <div class="ep-name-title" style="font-weight:700; font-size:15px; color:#fff; white-space:normal; line-height:1.3;">${ep.name || `Episodio ${ep.episode_number}`}${statusBadgeHtml}</div>
+                                <div style="font-size:13px; color:var(--text-muted); margin-top:4px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${ep.overview || 'Episodio disponible en alta definición con subtítulos en español.'}</div>
                             </div>
                         </div>
                         <div class="ep-row-right" style="display:flex; align-items:center; gap:14px; flex-shrink:0;">
@@ -13872,6 +13942,28 @@
             }
 
             if (serverIndex >= directServersQueue.length) {
+                if (PROXY_BASE && currentTmdbPlaying && !currentTmdbPlaying.retriedFresh) {
+                    currentTmdbPlaying.retriedFresh = true;
+                    const cItem = currentTmdbPlaying.item || {};
+                    const cType = cItem.media_type || (currentTmdbPlaying.season ? 'tv' : (cItem.title ? 'movie' : 'tv'));
+                    const cS = currentTmdbPlaying.season || 1;
+                    const cE = currentTmdbPlaying.episode || 1;
+                    const qT = encodeURIComponent(cItem.title || cItem.name || '');
+                    const qOT = encodeURIComponent(cItem.original_title || cItem.original_name || '');
+                    showToast('🔄 Renovando llaves de stream en tiempo real...');
+                    fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${cItem.id}&type=${cType}&s=${cS}&e=${cE}&orig_lang=${encodeURIComponent(cItem.original_language || 'en')}&title=${qT}&orig_title=${qOT}&refresh=1`)
+                        .then(r => r.json())
+                        .then(freshData => {
+                            if (freshData && freshData.status === 'ok' && freshData.servers && freshData.servers.length > 0) {
+                                directServersQueue = freshData.servers;
+                                executeTmdbDirectPlayback(0, startTime);
+                            } else {
+                                triggerIframeFallback();
+                            }
+                        })
+                        .catch(() => triggerIframeFallback());
+                    return;
+                }
                 console.warn('[TMDB PLAYER] Todos los servidores directos agotados, activando fallback alternativo...');
                 triggerIframeFallback();
                 return;

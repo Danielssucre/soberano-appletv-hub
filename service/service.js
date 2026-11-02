@@ -465,7 +465,7 @@ async function getAnimeDetails(slug) {
 
     const now = Date.now();
     const cached = ANIME_CACHE.get(normalizedSlug);
-    if (cached && (now - cached.ts < 7200000)) {
+    if (cached && (now - cached.ts < 600000)) {
         return cached.data;
     }
 
@@ -481,15 +481,18 @@ async function getAnimeDetails(slug) {
         const pm = html.match(/<p\s+class=["']scroll["'][^>]*>([\s\S]*?)<\/p>/);
         const synopsis = pm ? pm[1].replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').trim() : '';
 
-        // 3. Episodes
+        // 3. Episodes (soporta animes finalizados y en emisión con actualización dinámica)
         const epm = html.match(/<span>Episodios:<\/span>\s*([^<]+)/);
-        let eps_count = epm ? parseInt(epm[1].trim(), 10) : 12;
-        if (isNaN(eps_count) || eps_count === 0) {
-            const links = html.match(new RegExp(`${normalizedSlug}/(\\d+)/`, 'g')) || [];
-            const nums = links.map(l => parseInt(l.split('/')[1], 10)).filter(n => !isNaN(n));
-            if (nums.length > 0) eps_count = Math.max(...nums);
-            else eps_count = 12;
+        let eps_count = epm ? parseInt(epm[1].trim(), 10) : 0;
+        const links = html.match(new RegExp(`${normalizedSlug}/(\\d+)/?`, 'g')) || [];
+        const nums = links.map(l => parseInt(l.split('/')[1], 10)).filter(n => !isNaN(n) && n > 0 && n < 5000);
+        if (nums.length > 0) {
+            const maxLinkEp = Math.max(...nums);
+            if (isNaN(eps_count) || eps_count === 0 || maxLinkEp > eps_count) {
+                eps_count = maxLinkEp;
+            }
         }
+        if (isNaN(eps_count) || eps_count <= 0) eps_count = 12;
 
         // 4. Poster
         const postm = html.match(/<meta property="og:image" content="(.*?)"/);
@@ -533,36 +536,50 @@ async function getAnimeDetails(slug) {
     }
 }
 
-function proxyTmdbRequest(subpath, queryStr) {
-    let finalQuery = queryStr || '';
-    if (!finalQuery.includes('language=')) {
-        finalQuery += (finalQuery ? '&' : '') + 'language=es-MX';
-    }
+const TMDB_OFFICIAL_KEY = '15d2ea6d0dc1d476efbca3eba2b9bbfb';
+
+function fetchHttpsJsonRaw(hostname, fullPath, timeoutMs = 6000) {
     return new Promise((resolve, reject) => {
-        const fullPath = `/api/tmdb/${subpath}?${finalQuery}`;
         const opts = {
-            hostname: 'nabby.pro',
+            hostname: hostname,
             port: 443,
             path: fullPath,
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
                 'Accept': 'application/json'
             },
-            timeout: 8000
+            timeout: timeoutMs
         };
-
         const req = https.request(opts, (res) => {
             let data = '';
             res.setEncoding('utf8');
             res.on('data', chunk => { data += chunk; });
             res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
         });
-
         req.on('error', reject);
-        req.on('timeout', () => { req.abort(); reject(new Error('TMDB Proxy Timeout')); });
+        req.on('timeout', () => { req.abort(); reject(new Error('TMDB Request Timeout: ' + hostname)); });
         req.end();
     });
+}
+
+async function proxyTmdbRequest(subpath, queryStr) {
+    let finalQuery = queryStr || '';
+    if (!finalQuery.includes('language=')) {
+        finalQuery += (finalQuery ? '&' : '') + 'language=es-MX';
+    }
+    // 1. Fuente Primaria en Tiempo Real: API Oficial de TMDB (0 retraso de caché en estrenos/nuevas temporadas)
+    try {
+        const officialQuery = `api_key=${TMDB_OFFICIAL_KEY}&${finalQuery}`;
+        const primaryRes = await fetchHttpsJsonRaw('api.themoviedb.org', `/3/${subpath}?${officialQuery}`, 5500);
+        if (primaryRes && primaryRes.statusCode === 200 && primaryRes.body && primaryRes.body.length > 2) {
+            return primaryRes;
+        }
+    } catch (ePrimary) {
+        console.warn(`[TMDB_PRIMARY] Fallback a espejo para ${subpath}: ${ePrimary.message}`);
+    }
+    // 2. Espejo de Respaldo: nabby.pro
+    return fetchHttpsJsonRaw('nabby.pro', `/api/tmdb/${subpath}?${finalQuery}`, 7500);
 }
 
 const TMDB_STREAM_CACHE = new Map();
@@ -1045,7 +1062,7 @@ function getStreamDeduplicationKey(url) {
     }
 }
 
-function deduplicateAndRankStreams(candidates, origLang) {
+function deduplicateAndRankStreams(candidates, origLang, sharedEsSub, sharedAllSubs) {
     var isForeign = (origLang || 'en').toLowerCase() !== 'es';
     var seenUrls = new Set();
     var unique = [];
@@ -1060,11 +1077,22 @@ function deduplicateAndRankStreams(candidates, origLang) {
         }
         seenUrls.add(normKey);
 
-        var score = c.score || 0;
+        // Enriquecer cualquier candidato (ej. Cuevana/Gnula) con los subtítulos españoles verificados de OpenSubtitles
+        if ((!c.subtitles || c.subtitles.length === 0) && sharedAllSubs && sharedAllSubs.length > 0) {
+            c.subtitles = sharedAllSubs;
+        }
+        if (!c.sub_es && sharedEsSub) {
+            c.sub_es = sharedEsSub;
+        }
+
+        var score = c.base_bonus || 0;
+        if (c.server && (c.server.indexOf('Cuevana3c') === 0 || c.server.indexOf('Gnula') === 0)) {
+            score += 75;
+        }
         if (c.is_sub) {
             score += 1000; // Preferencia universal solicitada: HD con subtítulos
         } else if (c.audio_es) {
-            score += 200;
+            score += 900;  // Audio Español Latino / Castellano listo en la barra de servidores
         }
 
         if (c.quality === '1080p' || c.quality === 'HD') {
@@ -1092,30 +1120,52 @@ function safeAll(promises) {
     }));
 }
 
-async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang = 'en', reqHost = '127.0.0.1:9099') {
-    const isTv = type === 'tv';
-    const url = isTv
-        ? `https://api.framextv.tech/api/stream?type=tv&id=${id}&s=${s}&e=${e}`
-        : `https://api.framextv.tech/api/stream?type=movie&id=${id}`;
-
+async function fetchFramexCluster(url, timeoutMs = 5000) {
     try {
         const text = await fetchText(url, {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
             'Accept': 'application/json'
-        }, 5500);
-        const data = JSON.parse(text);
-        if (!data.success || !Array.isArray(data.sources) || data.sources.length === 0) {
-            return [];
-        }
+        }, timeoutMs);
+        return JSON.parse(text);
+    } catch (e) {
+        return null;
+    }
+}
+
+async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang = 'en', reqHost = '127.0.0.1:9099') {
+    const isTv = type === 'tv';
+    // CRÍTICO: Pasar tanto season/episode como s/e garantiza resolución exacta de temporada/episodio en todos los clusters
+    const baseQ = isTv
+        ? `type=tv&id=${id}&season=${s}&episode=${e}&s=${s}&e=${e}`
+        : `type=movie&id=${id}`;
+
+    try {
+        // Federación Multi-Cluster en Paralelo:
+        // - Default/Titan (MP4 Directo 1080p + Subtítulos OpenSubtitles)
+        // - Bowler (PrimeVids / Rivestream HLS - indexación inmediata de episodios en emisión)
+        // - Executioner (Vidrock HLS - alta disponibilidad global)
+        // - Root Rider (Vidzee / FastCloud HLS)
+        const clusterUrls = [
+            `https://api.framextv.tech/api/stream?${baseQ}`,
+            `https://api.framextv.tech/api/stream?${baseQ}&provider=bowler`,
+            `https://api.framextv.tech/api/stream?${baseQ}&provider=executioner`,
+            `https://api.framextv.tech/api/stream?${baseQ}&provider=root_rider`
+        ];
+
+        const responses = await safeAll(clusterUrls.map((u, idx) => fetchFramexCluster(u, idx === 0 ? 5500 : 4800)));
 
         let esSub = null;
         const allSubs = [];
-        if (Array.isArray(data.subtitles)) {
+        const seenSubUrls = new Set();
+
+        responses.forEach(data => {
+            if (!data || !Array.isArray(data.subtitles)) return;
             data.subtitles.forEach(sub => {
-                if (!sub || !sub.url) return;
+                if (!sub || !sub.url || seenSubUrls.has(sub.url)) return;
                 const langCode = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
                 const isEs = /(?:^|[^a-z])(?:spa|spl|spn|es(?:-[a-z0-9]+)?|espa[ñn]ol|spanish|castellano|latino)(?:$|[^a-z])/i.test(langCode);
                 if (isEs) {
+                    seenSubUrls.add(sub.url);
                     const proxiedSub = `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`;
                     allSubs.push({
                         url: proxiedSub,
@@ -1126,43 +1176,65 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
                     if (!esSub) esSub = proxiedSub;
                 }
             });
-        }
+        });
 
         const candidates = [];
-        for (let i = 0; i < data.sources.length; i++) {
-            const src = data.sources[i];
-            if (!src || !src.url) continue;
+        let orderIdx = 0;
 
-            const isHls = src.type === 'hls' || src.url.includes('.m3u8');
-            const is1080 = (src.quality || '').includes('1080') || src.quality === 'dcloud' || src.quality === 'tcloud';
-            const serverClean = (src.server || ('Servidor ' + (i + 1)))
-                .replace(/^Framex\s*/i, '')
-                .replace(/\s*-\s*S\d+E\d+\s*/i, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
-            const serverName = `Framex ${serverClean} (${is1080 ? '1080p' : 'HD'})`;
+        responses.forEach(data => {
+            if (!data || !data.success || !Array.isArray(data.sources)) return;
+            for (let i = 0; i < data.sources.length; i++) {
+                const src = data.sources[i];
+                if (!src || !src.url) continue;
 
-            let score = 1400;
-            if (is1080) score += 150;
-            if (isHls) score += 50;
+                const rawSrv = src.server || ('Servidor ' + (orderIdx + 1));
+                // Omitir espejos redundantes Relay / VPS del mismo cluster para mantener limpia la UI
+                if (/\b(?:Relay|VPS)\b/i.test(rawSrv) && i > 0) continue;
 
-            candidates.push({
-                status: 'ok',
-                id: String(id),
-                type: type,
-                season: String(s),
-                episode: String(e),
-                direct_stream_url: src.url,
-                server: serverName,
-                is_sub: true,
-                quality: is1080 ? '1080p' : '720p',
-                format: isHls ? 'hls' : 'mp4',
-                audio_es: false,
-                sub_es: esSub,
-                subtitles: allSubs,
-                score: score - (i * 10)
-            });
-        }
+                // GUARDIA DE INTEGRIDAD DE EPISODIO:
+                // Si el servidor etiqueta explícitamente SxxExx, verificar que coincida exactamente con S{s}E{e}
+                if (isTv) {
+                    const epMatch = rawSrv.match(/S(\d+)E(\d+)/i);
+                    if (epMatch) {
+                        const srvSeason = parseInt(epMatch[1], 10);
+                        const srvEp = parseInt(epMatch[2], 10);
+                        if (srvSeason !== parseInt(s, 10) || srvEp !== parseInt(e, 10)) {
+                            console.warn(`[FRAMEX_GUARD] Descartado stream con episodio no coincidente: ${rawSrv} (solicitado S${s}E${e})`);
+                            continue;
+                        }
+                    }
+                }
+
+                const isHls = src.type === 'hls' || src.url.includes('.m3u8');
+                const is1080 = (src.quality || '').includes('1080') || src.quality === 'dcloud' || src.quality === 'tcloud' || src.quality === 'Auto';
+                const serverClean = rawSrv
+                    .replace(/^Framex\s*/i, '')
+                    .replace(/\s*-\s*S\d+E\d+\s*/i, ' ')
+                    .replace(/\s*·\s*(?:dcloud|ipcloud|tcloud|Relay|VPS)/gi, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                const serverName = `Framex ${serverClean} (${is1080 ? '1080p' : 'HD'})`;
+
+                candidates.push({
+                    status: 'ok',
+                    id: String(id),
+                    type: type,
+                    season: String(s),
+                    episode: String(e),
+                    direct_stream_url: src.url,
+                    server: serverName,
+                    is_sub: true,
+                    quality: is1080 ? '1080p' : '720p',
+                    format: isHls ? 'hls' : 'mp4',
+                    audio_es: false,
+                    sub_es: esSub,
+                    subtitles: allSubs,
+                    base_bonus: 55 - (orderIdx * 4)
+                });
+                orderIdx++;
+            }
+        });
+
         return candidates;
     } catch (e) {
         console.warn(`[FRAMEX_RESOLVER] Error para ${id} (${type} S${s}E${e}): ${e.message}`);
@@ -1170,11 +1242,12 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
     }
 }
 
-async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '') {
+async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '', forceRefresh = false) {
     const cacheKey = `${id}_${type}_${s}_${e}`;
     const now = Date.now();
     const cached = TMDB_STREAM_CACHE.get(cacheKey);
-    if (cached && (now - cached.ts < 7200000)) {
+    // TTL de 15 minutos (900000 ms) para garantizar tokens CDN frescos y detección rápida de nuevos episodios
+    if (!forceRefresh && cached && (now - cached.ts < 900000)) {
         return decorateWithAligned(rewriteSubHost(cached.data, reqHost), id, type, s, e, reqHost);
     }
 
@@ -1195,7 +1268,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
     } catch(e) {}
     titles = Array.from(new Set(titles.filter(Boolean)));
 
-    console.log(`[TRI_RESOLVER] Consultando Cuevana3c, Gnula y Framex para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
+    console.log(`[MULTI_CLUSTER_RESOLVER] Consultando Cuevana3c, Gnula y 4 Clusters Framex para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
 
     try {
         const triResults = await safeAll([
@@ -1204,11 +1277,21 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
             resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost)
         ]);
 
-        const allCandidates = [].concat(triResults[0] || [], triResults[1] || [], triResults[2] || []);
-        console.log(`[TRI_RESOLVER] Total candidatos obtenidos de Cuevana + Gnula + Framex: ${allCandidates.length}`);
+        const framexCands = triResults[2] || [];
+        let sharedEsSub = null;
+        let sharedAllSubs = [];
+        for (let fIdx = 0; fIdx < framexCands.length; fIdx++) {
+            if (framexCands[fIdx].sub_es && !sharedEsSub) sharedEsSub = framexCands[fIdx].sub_es;
+            if (framexCands[fIdx].subtitles && framexCands[fIdx].subtitles.length > sharedAllSubs.length) {
+                sharedAllSubs = framexCands[fIdx].subtitles;
+            }
+        }
 
-        const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang);
-        console.log(`[TRI_RESOLVER] Candidatos únicos y clasificados: ${ranked.length}`);
+        const allCandidates = [].concat(triResults[0] || [], triResults[1] || [], framexCands);
+        console.log(`[MULTI_CLUSTER_RESOLVER] Total candidatos brutos obtenidos: ${allCandidates.length}`);
+
+        const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang, sharedEsSub, sharedAllSubs);
+        console.log(`[MULTI_CLUSTER_RESOLVER] Candidatos únicos y clasificados: ${ranked.length}`);
 
         if (ranked.length > 0) {
             const primary = ranked[0];
@@ -1219,12 +1302,12 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
                 is_sub: c.is_sub,
                 audio_es: c.audio_es
             }));
-            console.log(`[TRI_RESOLVER SUCCESS] Stream ganador seleccionado (${primary.server}, score: ${primary.score}):`, primary.direct_stream_url.slice(0, 80) + '...');
+            console.log(`[MULTI_CLUSTER_RESOLVER SUCCESS] Stream ganador seleccionado (${primary.server}, score: ${primary.score}, total servers: ${primary.servers.length}):`, primary.direct_stream_url.slice(0, 80) + '...');
             TMDB_STREAM_CACHE.set(cacheKey, { data: primary, ts: now });
             return decorateWithAligned(primary, id, type, s, e, reqHost);
         }
     } catch (triErr) {
-        console.warn(`[TRI_RESOLVER] Error durante resolución: ${triErr.message}`);
+        console.warn(`[MULTI_CLUSTER_RESOLVER] Error durante resolución: ${triErr.message}`);
     }
 
     return {
@@ -1543,13 +1626,15 @@ const server = http.createServer(async (req, res) => {
 
         try {
             const tmdbRes = await proxyTmdbRequest(subpath, queryStr);
+            const isDynamicSeries = subpath.startsWith('tv/') || subpath.includes('trending') || subpath.includes('airing') || subpath.includes('now_playing');
             res.writeHead(tmdbRes.statusCode || 200, {
                 'Content-Type': 'application/json; charset=utf-8',
-                'Cache-Control': 'public, max-age=3600'
+                'Cache-Control': isDynamicSeries ? 'public, max-age=300' : 'public, max-age=1800',
+                'Access-Control-Allow-Origin': '*'
             });
             return res.end(tmdbRes.body);
         } catch (e) {
-            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             return res.end(JSON.stringify({ results: [], error: e.message }));
         }
     }
@@ -1560,12 +1645,13 @@ const server = http.createServer(async (req, res) => {
         const type = parsed.query.type || 'movie';
         const s = parsed.query.s || parsed.query.season || 1;
         const e = parsed.query.e || parsed.query.episode || 1;
+        const forceRefresh = parsed.query.refresh === '1' || parsed.query.refresh === 'true';
 
         try {
             const origLang = parsed.query.orig_lang || 'en';
             const expectedTitle = parsed.query.title || '';
             const expectedOrigTitle = parsed.query.orig_title || '';
-            const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, expectedTitle, expectedOrigTitle);
+            const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, expectedTitle, expectedOrigTitle, forceRefresh);
             const jsonStr = JSON.stringify(streamData);
             res.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
