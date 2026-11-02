@@ -1354,12 +1354,90 @@
             color: var(--text-secondary);
         }
 
+        .season-bar-container {
+            margin: 14px 0 8px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .season-bar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .season-bar-title-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .season-bar-label {
+            font-size: 15px;
+            font-weight: 700;
+            color: #ffffff;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .season-count-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: 10px;
+            background: rgba(56, 189, 248, 0.16);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.35);
+        }
+
+        .season-dropdown-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .season-select-native {
+            appearance: none;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 7px 30px 7px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            outline: none;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+
+        .season-select-native:focus,
+        .season-select-native:hover {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: #38bdf8;
+            color: #38bdf8;
+        }
+
+        .season-select-arrow {
+            position: absolute;
+            right: 10px;
+            pointer-events: none;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
         .season-tabs-row {
             display: flex;
             gap: 10px;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
-            padding: 8px 4px 12px 4px;
+            padding: 4px 4px 10px 4px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             scrollbar-width: none;
         }
@@ -1369,17 +1447,20 @@
 
         .season-tab {
             background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.14);
             color: var(--text-secondary);
             font-size: 14px;
             font-weight: 600;
             padding: 9px 18px;
-            border-radius: 12px;
+            border-radius: 14px;
             cursor: pointer;
             white-space: nowrap;
             transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             flex-shrink: 0;
             touch-action: manipulation;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .season-tab:active {
@@ -1392,6 +1473,167 @@
             color: #38bdf8;
             font-weight: 700;
             box-shadow: 0 0 15px rgba(14, 165, 233, 0.25);
+        }
+
+        .season-tab .tab-ep-count {
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.75;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 2px 6px;
+            border-radius: 8px;
+        }
+        .season-tab.active .tab-ep-count {
+            background: rgba(3, 16, 24, 0.3);
+            color: #031018;
+        }
+
+        /* Modal Picker de Temporadas Apple HIG */
+        .season-picker-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            z-index: 10000;
+            display: none;
+            align-items: flex-end;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        .season-picker-backdrop.active {
+            display: flex;
+            opacity: 1;
+        }
+        .season-picker-sheet {
+            width: 100%;
+            max-width: 520px;
+            background: #141a26;
+            border-radius: 26px 26px 0 0;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-bottom: none;
+            box-shadow: 0 -15px 50px rgba(0, 0, 0, 0.95);
+            padding: 12px 18px calc(24px + env(safe-area-inset-bottom, 20px)) 18px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            animation: slideUpSeasonPicker 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideUpSeasonPicker {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        .season-picker-handle {
+            width: 40px;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+            margin: 4px auto 14px auto;
+        }
+        .season-picker-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .season-picker-title {
+            font-size: 17px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .season-picker-close {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            color: #ffffff;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .season-picker-items {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: calc(80vh - 120px);
+        }
+        .season-picker-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 18px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1.5px solid rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            touch-action: manipulation;
+        }
+        .season-picker-item:active {
+            transform: scale(0.98);
+        }
+        .season-picker-item.active {
+            background: rgba(14, 165, 233, 0.18);
+            border-color: #38bdf8;
+            box-shadow: 0 4px 18px rgba(56, 189, 248, 0.25);
+        }
+        .season-picker-item-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .season-picker-item-check {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255, 255, 255, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: transparent;
+            transition: all 0.2s ease;
+        }
+        .season-picker-item.active .season-picker-item-check {
+            background: #38bdf8;
+            border-color: #38bdf8;
+            color: #031018;
+            font-weight: 800;
+        }
+        .season-picker-item-name {
+            font-size: 15px;
+            font-weight: 700;
+        }
+        .season-picker-item.active .season-picker-item-name {
+            color: #38bdf8;
+        }
+        .season-picker-item-right {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.6);
+            background: rgba(255, 255, 255, 0.08);
+            padding: 4px 10px;
+            border-radius: 10px;
+        }
+        .season-picker-item.active .season-picker-item-right {
+            background: rgba(56, 189, 248, 0.2);
+            color: #38bdf8;
+            font-weight: 700;
         }
 
         .episodes-list {
@@ -3224,16 +3466,53 @@
                 gap: 6px !important;
             }
 
-            /* Barra y Pestañas de Temporadas en Móvil - Alta Visibilidad Apple HIG */
+            /* Barra y Pestañas de Temporadas en Móvil - Sticky Apple HIG con Cero Pérdida */
+            .season-bar-container {
+                position: -webkit-sticky !important;
+                position: sticky !important;
+                top: -14px !important;
+                z-index: 30 !important;
+                background: rgba(13, 18, 28, 0.96) !important;
+                backdrop-filter: blur(25px) saturate(180%) !important;
+                -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
+                margin: 0 -16px 10px -16px !important;
+                padding: 10px 16px 8px 16px !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+            }
+
+            .season-bar-header {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                margin-bottom: 8px !important;
+            }
+
+            .season-bar-label {
+                font-size: 14.5px !important;
+                font-weight: 700 !important;
+                color: #ffffff !important;
+            }
+
+            .season-select-native {
+                background: rgba(255, 255, 255, 0.12) !important;
+                border: 1px solid rgba(255, 255, 255, 0.25) !important;
+                font-size: 13px !important;
+                padding: 8px 30px 8px 12px !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                border-radius: 12px !important;
+            }
+
             .season-tabs-row {
                 display: flex !important;
                 gap: 8px !important;
                 overflow-x: auto !important;
                 -webkit-overflow-scrolling: touch !important;
-                padding: 8px 16px 14px 16px !important;
-                margin: 0 -16px 12px -16px !important;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
-                background: rgba(13, 18, 28, 0.6) !important;
+                padding: 2px 0 6px 0 !important;
+                margin: 0 !important;
+                border: none !important;
+                background: transparent !important;
                 scrollbar-width: none !important;
             }
 
@@ -3243,17 +3522,18 @@
 
             .season-tab {
                 min-height: 44px !important;
-                padding: 0 18px !important;
+                padding: 0 16px !important;
                 font-size: 13.5px !important;
                 font-weight: 700 !important;
                 border-radius: 22px !important;
-                background: rgba(255, 255, 255, 0.1) !important;
-                border: 1.5px solid rgba(255, 255, 255, 0.2) !important;
-                color: rgba(255, 255, 255, 0.85) !important;
+                background: rgba(255, 255, 255, 0.12) !important;
+                border: 1.5px solid rgba(255, 255, 255, 0.22) !important;
+                color: #ffffff !important;
                 flex-shrink: 0 !important;
                 display: inline-flex !important;
                 align-items: center !important;
                 justify-content: center !important;
+                gap: 6px !important;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
             }
 
@@ -3978,6 +4258,24 @@
 
                 <p class="sheet-synopsis" id="sheetSynopsis"></p>
 
+                <!-- Barra de Temporadas y Solapas (Apple TV HIG - Sticky) -->
+                <div class="season-bar-container" id="seasonBarContainer" style="display:none;">
+                    <div class="season-bar-header">
+                        <div class="season-bar-title-wrap" onclick="openSeasonPickerModal()" title="Tocar para ver lista de temporadas">
+                            <span class="season-bar-label"><i class="fa fa-layer-group" style="color:#38bdf8;"></i> Temporadas</span>
+                            <span class="season-count-badge" id="seasonCountBadge">4 Temporadas</span>
+                        </div>
+                        <div class="season-dropdown-wrap">
+                            <select id="seasonSelectDropdown" class="season-select-native" onchange="onSeasonDropdownChange(this.value)" aria-label="Seleccionar Temporada">
+                                <!-- Dinámico -->
+                            </select>
+                            <i class="fa fa-chevron-down season-select-arrow"></i>
+                        </div>
+                    </div>
+                    <!-- Pestañas horizontales deslizables de alta visibilidad -->
+                    <div class="season-tabs-row" id="seasonTabsRow"></div>
+                </div>
+
                 <!-- Action Bar para Películas y Series (Servidor + Subtítulos) -->
                 <div class="sheet-action-bar" id="sheetActionBar" style="display:none;">
                     <button class="btn-apple-primary" id="btnSheetPlayMovie" onclick="playActiveMovie()"><i class="fa fa-play"></i> Reproducir Película</button>
@@ -3994,11 +4292,22 @@
                     <span class="sub-es-indicator"><i class="fa fa-check-circle"></i> Solo Español</span>
                 </div>
 
-                <!-- Tabs de Temporadas -->
-                <div class="season-tabs-row" id="seasonTabsRow"></div>
-
                 <!-- Lista de Episodios -->
                 <div class="episodes-list" id="sheetEpisodesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Picker de Temporadas Apple HIG (Acceso directo al tocar badge o título) -->
+    <div class="season-picker-backdrop" id="seasonPickerModal" onclick="closeSeasonPickerModal(event)">
+        <div class="season-picker-sheet" onclick="event.stopPropagation()">
+            <div class="season-picker-handle"></div>
+            <div class="season-picker-head">
+                <div class="season-picker-title"><i class="fa fa-layer-group" style="color:#38bdf8;"></i> Seleccionar Temporada</div>
+                <button class="season-picker-close" onclick="closeSeasonPickerModal()"><i class="fa fa-times"></i></button>
+            </div>
+            <div class="season-picker-items" id="seasonPickerItems">
+                <!-- Dinámico -->
             </div>
         </div>
     </div>
@@ -11059,8 +11368,81 @@
         }
 
         // ==========================================
-        // I. MODAL SHEET: DETALLES Y EPISODIOS
+        // I. MODAL SHEET: DETALLES Y EPISODIOS & MOTOR DE TEMPORADAS APPLE HIG
         // ==========================================
+        function openSeasonPickerModal() {
+            const modal = document.getElementById('seasonPickerModal');
+            if (!modal) return;
+            renderSeasonPickerItems();
+            modal.classList.add('active');
+        }
+
+        function closeSeasonPickerModal(e) {
+            if (e && e.target && e.target !== document.getElementById('seasonPickerModal') && !e.target.closest('.season-picker-close')) return;
+            const modal = document.getElementById('seasonPickerModal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        function renderSeasonPickerItems() {
+            const container = document.getElementById('seasonPickerItems');
+            if (!container) return;
+            container.innerHTML = '';
+
+            if (activeTmdbItem && activeTmdbSeasons && activeTmdbSeasons.length > 0) {
+                activeTmdbSeasons.forEach(season => {
+                    const isActive = season.season_number === activeTmdbSeasonNum;
+                    const item = document.createElement('div');
+                    item.className = `season-picker-item ${isActive ? 'active' : ''}`;
+                    item.onclick = () => {
+                        selectTmdbSeason(season.season_number);
+                        closeSeasonPickerModal();
+                    };
+                    item.innerHTML = `
+                        <div class="season-picker-item-left">
+                            <div class="season-picker-item-check"><i class="fa fa-check"></i></div>
+                            <div>
+                                <div class="season-picker-item-name">${season.name || `Temporada ${season.season_number}`}</div>
+                                <div style="font-size:11.5px; color:rgba(255,255,255,0.5); margin-top:2px;">Transmisión HD • Subtítulos en Español</div>
+                            </div>
+                        </div>
+                        <div class="season-picker-item-right">${season.episode_count ? `${season.episode_count} eps` : 'Episodios'}</div>
+                    `;
+                    container.appendChild(item);
+                });
+            } else if (activeAnime && activeAnime.seasons && activeAnime.seasons.length > 0) {
+                activeAnime.seasons.forEach((season, sIdx) => {
+                    const isActive = sIdx === activeSeasonIndex;
+                    const item = document.createElement('div');
+                    item.className = `season-picker-item ${isActive ? 'active' : ''}`;
+                    item.onclick = () => {
+                        selectSeasonTab(sIdx);
+                        closeSeasonPickerModal();
+                    };
+                    const epCount = season.episodes ? season.episodes.length : 0;
+                    item.innerHTML = `
+                        <div class="season-picker-item-left">
+                            <div class="season-picker-item-check"><i class="fa fa-check"></i></div>
+                            <div>
+                                <div class="season-picker-item-name">${season.name || `Temporada ${sIdx + 1}`}</div>
+                                <div style="font-size:11.5px; color:rgba(255,255,255,0.5); margin-top:2px;">Bóveda Apple TV • HD Nativo</div>
+                            </div>
+                        </div>
+                        <div class="season-picker-item-right">${epCount ? `${epCount} eps` : 'Episodios'}</div>
+                    `;
+                    container.appendChild(item);
+                });
+            }
+        }
+
+        function onSeasonDropdownChange(val) {
+            const sNum = parseInt(val, 10);
+            if (activeTmdbItem) {
+                selectTmdbSeason(sNum);
+            } else if (activeAnime) {
+                selectSeasonTab(sNum);
+            }
+        }
+
         function openDetailsSheet(anime) {
             activeAnime = anime;
             activeTmdbItem = null;
@@ -11072,13 +11454,39 @@
             document.getElementById('sheetTitle').textContent = anime.title;
             document.getElementById('sheetSynopsis').textContent = anime.synopsis || 'Sin descripción disponible.';
 
+            const totalSeasons = (anime.seasons && anime.seasons.length > 0) ? anime.seasons.length : 1;
+
             // Badges
             const badgesWrap = document.getElementById('sheetBadges');
             badgesWrap.innerHTML = `
                 <span class="meta-badge">${anime.year || '2024'}</span>
+                <span class="meta-badge badge-seasons-highlight" id="badgeTotalSeasons" style="cursor:pointer;" onclick="openSeasonPickerModal()" title="Tocar para cambiar de temporada">
+                    <i class="fa fa-layer-group" style="color:#38bdf8;"></i> <span id="badgeSeasonLabel">${totalSeasons} ${totalSeasons === 1 ? 'Temporada' : 'Temporadas'}</span> <i class="fa fa-chevron-down" style="font-size:11px; margin-left:4px; opacity:0.8;"></i>
+                </span>
                 <span class="meta-badge">${anime.studio || 'Anime Vault'}</span>
                 <span class="meta-badge">1080p Ultra HD</span>
             `;
+
+            // Barra de Temporadas Sticky
+            const seasonBar = document.getElementById('seasonBarContainer');
+            if (seasonBar) seasonBar.style.display = totalSeasons > 0 ? 'block' : 'none';
+
+            const countBadge = document.getElementById('seasonCountBadge');
+            if (countBadge) countBadge.textContent = `${totalSeasons} ${totalSeasons === 1 ? 'Temporada' : 'Temporadas'}`;
+
+            // Dropdown Select
+            const sDropdown = document.getElementById('seasonSelectDropdown');
+            if (sDropdown) {
+                sDropdown.innerHTML = '';
+                if (anime.seasons && anime.seasons.length > 0) {
+                    anime.seasons.forEach((season, sIdx) => {
+                        const opt = document.createElement('option');
+                        opt.value = sIdx;
+                        opt.textContent = `${season.name || 'Temporada ' + (sIdx + 1)}${season.episodes ? ' (' + season.episodes.length + ' eps)' : ''}`;
+                        sDropdown.appendChild(opt);
+                    });
+                }
+            }
 
             // Season Tabs
             const tabsRow = document.getElementById('seasonTabsRow');
@@ -11087,7 +11495,10 @@
                 anime.seasons.forEach((season, sIdx) => {
                     const btn = document.createElement('button');
                     btn.className = `season-tab ${sIdx === 0 ? 'active' : ''}`;
-                    btn.textContent = season.name || `Temporada ${sIdx + 1}`;
+                    btn.setAttribute('type', 'button');
+                    btn.dataset.season = sIdx;
+                    const epCount = season.episodes ? season.episodes.length : 0;
+                    btn.innerHTML = `${season.name || `Temporada ${sIdx + 1}`}${epCount ? ` <span class="tab-ep-count">${epCount} eps</span>` : ''}`;
                     btn.onclick = () => selectSeasonTab(sIdx);
                     tabsRow.appendChild(btn);
                 });
@@ -11101,9 +11512,22 @@
 
         function selectSeasonTab(sIdx) {
             activeSeasonIndex = sIdx;
-            document.querySelectorAll('.season-tab').forEach((tab, idx) => {
-                tab.classList.toggle('active', idx === sIdx);
+            document.querySelectorAll('#seasonTabsRow .season-tab').forEach((tab) => {
+                if (tab.dataset.season == sIdx) {
+                    tab.classList.add('active');
+                    tab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                } else {
+                    tab.classList.remove('active');
+                }
             });
+            const sDropdown = document.getElementById('seasonSelectDropdown');
+            if (sDropdown) sDropdown.value = sIdx;
+
+            const badgeLabel = document.getElementById('badgeSeasonLabel');
+            if (badgeLabel && activeAnime && activeAnime.seasons && activeAnime.seasons.length > 0) {
+                badgeLabel.textContent = `Temporada ${sIdx + 1} de ${activeAnime.seasons.length}`;
+            }
+
             if (activeAnime && activeAnime.seasons && activeAnime.seasons[sIdx]) {
                 renderSheetEpisodes(activeAnime.seasons[sIdx].episodes);
             }
@@ -11146,7 +11570,13 @@
             document.getElementById('sheetTitle').textContent = cleanTitle;
             document.getElementById('sheetSynopsis').textContent = 'Cargando información desde catálogo online...';
             document.getElementById('sheetBadges').innerHTML = '<span class="meta-badge">JKanime</span>';
-            document.getElementById('seasonTabsRow').innerHTML = '<button class="season-tab active">Episodios</button>';
+            const seasonBar = document.getElementById('seasonBarContainer');
+            if (seasonBar) seasonBar.style.display = 'block';
+            const countBadge = document.getElementById('seasonCountBadge');
+            if (countBadge) countBadge.textContent = 'Episodios';
+            const sDropdown = document.getElementById('seasonSelectDropdown');
+            if (sDropdown) sDropdown.innerHTML = '<option value="0">Episodios Completos</option>';
+            document.getElementById('seasonTabsRow').innerHTML = '<button class="season-tab active" type="button" data-season="0">Episodios Completos</button>';
             const listContainer = document.getElementById('sheetEpisodesList');
             listContainer.innerHTML = '<div class="apple-spinner"></div>';
             overlay.classList.add('active');
@@ -11233,6 +11663,7 @@
         function closeSheet(e) {
             if (e && e.target !== document.getElementById('sheetOverlay') && !e.target.closest('.sheet-close-btn')) return;
             document.getElementById('sheetOverlay').classList.remove('active');
+            closeSeasonPickerModal();
         }
 
         // ==========================================
@@ -13154,6 +13585,9 @@
                 <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);">Subtítulos en Español</span>
             `;
 
+            const seasonBar = document.getElementById('seasonBarContainer');
+            if (seasonBar) seasonBar.style.display = 'none';
+
             const tabsRow = document.getElementById('seasonTabsRow');
             const listContainer = document.getElementById('sheetEpisodesList');
             tabsRow.innerHTML = '';
@@ -13276,11 +13710,13 @@
                     }
 
                     const genres = (full.genres || []).map(g => g.name).join(' • ');
-                    const totalSeasons = activeTmdbSeasons.length ? `${activeTmdbSeasons.length} Temporadas` : 'Serie TV';
+                    const totalSeasonsCount = activeTmdbSeasons.length;
+                    const totalSeasons = totalSeasonsCount ? `${totalSeasonsCount} Temporadas` : 'Serie TV';
+
                     badgesWrap.innerHTML = `
                         <span class="meta-badge">${year || '2024'}</span>
-                        <span class="meta-badge badge-seasons-highlight" id="badgeTotalSeasons" style="cursor:pointer;" onclick="scrollSheetToSeasonTabs()" title="Tocar para cambiar de temporada">
-                            <i class="fa fa-layer-group" style="color:#38bdf8;"></i> ${totalSeasons} <i class="fa fa-chevron-down" style="font-size:11px; margin-left:4px; opacity:0.8;"></i>
+                        <span class="meta-badge badge-seasons-highlight" id="badgeTotalSeasons" style="cursor:pointer;" onclick="openSeasonPickerModal()" title="Tocar para cambiar de temporada">
+                            <i class="fa fa-layer-group" style="color:#38bdf8;"></i> <span id="badgeSeasonLabel">${totalSeasons}</span> <i class="fa fa-chevron-down" style="font-size:11px; margin-left:4px; opacity:0.8;"></i>
                         </span>
                         <span class="meta-badge">${genres || 'Serie TV'}</span>
                         <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
@@ -13288,12 +13724,32 @@
                         <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);"><i class="fa fa-closed-captioning"></i> Subtítulos en Español</span>
                     `;
 
+                    // Mostrar barra de temporadas sticky
+                    if (seasonBar) seasonBar.style.display = totalSeasonsCount > 0 ? 'block' : 'none';
+
+                    const countBadge = document.getElementById('seasonCountBadge');
+                    if (countBadge) countBadge.textContent = `${totalSeasonsCount} Temporadas`;
+
+                    // Poblar Dropdown Select
+                    const sDropdown = document.getElementById('seasonSelectDropdown');
+                    if (sDropdown) {
+                        sDropdown.innerHTML = '';
+                        activeTmdbSeasons.forEach(season => {
+                            const opt = document.createElement('option');
+                            opt.value = season.season_number;
+                            opt.textContent = `${season.name || 'Temporada ' + season.season_number}${season.episode_count ? ' (' + season.episode_count + ' eps)' : ''}`;
+                            sDropdown.appendChild(opt);
+                        });
+                    }
+
+                    // Poblar Solapas / Tabs Horizontales
                     tabsRow.innerHTML = '';
                     activeTmdbSeasons.forEach((season, idx) => {
                         const btn = document.createElement('button');
                         btn.className = `season-tab ${idx === 0 ? 'active' : ''}`;
                         btn.setAttribute('type', 'button');
-                        btn.textContent = season.name || `Temporada ${season.season_number}`;
+                        btn.dataset.season = season.season_number;
+                        btn.innerHTML = `${season.name || 'Temporada ' + season.season_number}${season.episode_count ? ` <span class="tab-ep-count">${season.episode_count} eps</span>` : ''}`;
                         btn.onclick = (e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -13312,31 +13768,32 @@
         }
 
         function scrollSheetToSeasonTabs() {
-            const tabs = document.getElementById('seasonTabsRow');
-            if (tabs) {
-                tabs.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                tabs.style.transition = 'box-shadow 0.3s ease';
-                tabs.style.boxShadow = '0 0 20px rgba(56, 189, 248, 0.5)';
-                setTimeout(() => {
-                    tabs.style.boxShadow = 'none';
-                }, 1000);
-            }
+            openSeasonPickerModal();
         }
 
         async function selectTmdbSeason(seasonNum, tabBtn = null) {
             activeTmdbSeasonNum = seasonNum;
-            if (tabBtn) {
-                document.querySelectorAll('#seasonTabsRow .season-tab').forEach(b => b.classList.remove('active'));
-                tabBtn.classList.add('active');
-            } else {
-                const autoBtn = document.querySelectorAll('#seasonTabsRow .season-tab');
-                if (autoBtn && autoBtn.length > 0) {
-                    autoBtn.forEach(b => {
-                        if (b.textContent.includes(String(seasonNum))) b.classList.add('active');
-                        else b.classList.remove('active');
-                    });
+            
+            // 1. Sincronizar solapas en tabsRow
+            document.querySelectorAll('#seasonTabsRow .season-tab').forEach(b => {
+                if (b.dataset.season == seasonNum) {
+                    b.classList.add('active');
+                    b.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                } else {
+                    b.classList.remove('active');
                 }
+            });
+
+            // 2. Sincronizar dropdown select
+            const sDropdown = document.getElementById('seasonSelectDropdown');
+            if (sDropdown) sDropdown.value = seasonNum;
+
+            // 3. Sincronizar badge en header
+            const badgeLabel = document.getElementById('badgeSeasonLabel');
+            if (badgeLabel && activeTmdbSeasons && activeTmdbSeasons.length > 0) {
+                badgeLabel.textContent = `Temporada ${seasonNum} de ${activeTmdbSeasons.length}`;
             }
+
             const listContainer = document.getElementById('sheetEpisodesList');
             listContainer.innerHTML = '<div style="color:var(--text-muted); padding:30px; text-align:center;"><i class="fa fa-spinner fa-spin fa-2x"></i><p style="margin-top:10px;">Cargando episodios de Temporada ' + seasonNum + '...</p></div>';
 
