@@ -608,6 +608,353 @@ function isCorruptedSubFile(p) {
     } catch(e) { return true; }
 }
 
+function verifySpanishLinguisticText(rawText) {
+    if (!rawText || typeof rawText !== 'string' || rawText.length < 40) return false;
+    if (!rawText.includes('-->')) return false;
+    // Rechazar pistas con mojibake árabe/cirílico/hebreo
+    const sample = rawText.slice(0, 12000);
+    if (/[\u0600-\u06FF\u0400-\u04FF\u0590-\u05FF]/.test(sample)) return false;
+
+    const esWords = sample.match(/\b(?:que|los|las|para|por|con|una|como|pero|m[aá]s|esta|est[aá]|son|del|todo|bien|aqu[ií]|vamos|hola|gracias|s[ií]|qu[eé]|c[oó]mo|cu[aá]ndo|d[oó]nde|qui[eé]n|eso|esto|nada|algo|muy|tambi[eé]n|solo|s[oó]lo|cuando|porque|puedo|puede|hacer|tengo|tiene|eres|soy|estoy|est[aá]s|fue|era|hay|hab[ií]a|nunca|siempre|ahora|despu[eé]s|antes|hace|vida|tiempo|d[ií]a|noche|casa|hombre|mujer|padre|madre|hijo|dios|mierda|vamos|bueno|verdad|entonces|nosotros|ustedes|ellos)\b/gi);
+    const esChars = sample.match(/[áéíóúñ¡¿ÁÉÍÓÚÑ]/g);
+    const wordHits = esWords ? esWords.length : 0;
+    const charHits = esChars ? esChars.length : 0;
+    return (wordHits >= 3) || (wordHits >= 1 && charHits >= 2);
+}
+
+function convertSrtToWebVtt(rawSub) {
+    if (!rawSub) return '';
+    let vtt = String(rawSub).replace(/^\uFEFF/, '').replace(/\r/g, '');
+    vtt = vtt.replace(/\[\s*(?:cite|cita)\s*[:：]?\s*\d+\s*\]/gi, '')
+             .replace(/\b(?:cite|cita)\s*[:：]?\s*\d+\b/gi, '')
+             .replace(/\{\\[^}]*\}/g, '');
+    vtt = vtt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+             .replace(/(\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+    if (!/^\s*WEBVTT/i.test(vtt)) {
+        vtt = 'WEBVTT\n\n' + vtt;
+    }
+    return vtt;
+}
+
+const AUTO_SUB_CACHE = new Map();
+
+async function translateRawSubToSpanishVtt(rawSub) {
+    let clean = String(rawSub || '').replace(/^\uFEFF/, '').replace(/\r/g, '')
+        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+        .replace(/(\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+        .replace(/\{\\[^}]*\}/g, '');
+    const blocks = clean.split(/\n\n+/);
+    const cues = [];
+    for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
+        const lines = blocks[bIdx].trim().split('\n');
+        let tsIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('-->')) { tsIdx = i; break; }
+        }
+        if (tsIdx !== -1) {
+            const tsLine = lines[tsIdx];
+            const txt = lines.slice(tsIdx + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+            if (txt) cues.push({ ts: tsLine, text: txt });
+        }
+    }
+    const batchSize = 35;
+    const batches = [];
+    for (let i = 0; i < Math.min(cues.length, 650); i += batchSize) {
+        batches.push(cues.slice(i, i + batchSize));
+    }
+    await safeAll(batches.map(async (batch) => {
+        try {
+            const joined = batch.map(c => c.text).join('\n');
+            const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
+            const gRaw = await fetchText(gUrl, {}, 4500);
+            const gJson = JSON.parse(gRaw);
+            const fullTrans = (gJson[0] || []).map(x => (x && x[0]) ? x[0] : '').join('');
+            const transLines = fullTrans.split('\n');
+            for (let j = 0; j < batch.length; j++) {
+                if (transLines[j]) batch[j].text = transLines[j].trim();
+            }
+        } catch(eTrans) {}
+    }));
+    let outVtt = 'WEBVTT\n\n';
+    for (let cIdx = 0; cIdx < cues.length; cIdx++) {
+        outVtt += `${cues[cIdx].ts}\n${cues[cIdx].text}\n\n`;
+    }
+    return outVtt;
+}
+
+async function resolveAutoSpanishSubtitle(params, reqHost) {
+    let tmdbId = String(params.id || '').trim();
+    let type = (params.type === 'movie' || params.type === 'tv') ? params.type : (params.s || params.season || params.e || params.episode ? 'tv' : 'movie');
+    const s = parseInt(params.s || params.season || 1, 10) || 1;
+    const e = parseInt(params.e || params.episode || 1, 10) || 1;
+    const title = String(params.title || '').trim();
+    const slug = String(params.slug || '').trim();
+    const requestedTrack = Math.max(0, parseInt(params.track || 0, 10) || 0);
+
+    // 0. Verificar si es Ninku o si hay subtítulo local pre-sincronizado en disco
+    if (slug === 'ninku' || title.toLowerCase().includes('ninku')) {
+        const epPad = String(e).padStart(2, '0');
+        const ninkuFile = `ninku_ep${epPad}_es.vtt`;
+        const ninkuPath = path.join(SUBTITLES_DIR, ninkuFile);
+        if (fs.existsSync(ninkuPath)) {
+            const vttContent = fs.readFileSync(ninkuPath, 'utf8');
+            const vttUrl = `http://${reqHost}/subtitles/${ninkuFile}`;
+            return {
+                status: 'ok',
+                tmdb_id: tmdbId || 'ninku',
+                imdb_id: null,
+                selected_index: 0,
+                total_tracks: 1,
+                label: 'Español Oficial (Ninku)',
+                vtt_url: vttUrl,
+                vtt_content: vttContent,
+                tracks: [{ index: 0, label: 'Español Oficial (Ninku)', url: vttUrl }]
+            };
+        }
+    }
+
+    // 1. Si no tenemos un ID numérico de TMDB (ej. Anime o búsqueda por título), resolverlo en TMDB
+    if ((!tmdbId || !/^\d+$/.test(tmdbId)) && title) {
+        try {
+            const cleanTitle = title.replace(/\b(?:season|temporada|part|parte)\s*\d+/gi, '').replace(/[^\w\sáéíóúñÁÉÍÓÚÑ]/g, ' ').trim();
+            const searchPath = type === 'movie' ? 'search/movie' : 'search/tv';
+            const sRes = await proxyTmdbRequest(searchPath, `query=${encodeURIComponent(cleanTitle)}&language=es-MX`);
+            const sJson = JSON.parse(sRes.body || '{}');
+            if (sJson.results && sJson.results.length > 0) {
+                tmdbId = String(sJson.results[0].id);
+            } else {
+                const mRes = await proxyTmdbRequest('search/multi', `query=${encodeURIComponent(cleanTitle)}&language=es-MX`);
+                const mJson = JSON.parse(mRes.body || '{}');
+                const validHit = (mJson.results || []).find(r => r.media_type === 'tv' || r.media_type === 'movie');
+                if (validHit) {
+                    tmdbId = String(validHit.id);
+                    type = validHit.media_type;
+                }
+            }
+        } catch(eSearch) {
+            console.warn('[AUTO_SUB] Error buscando título en TMDB:', eSearch.message);
+        }
+    }
+
+    if (!tmdbId || !/^\d+$/.test(tmdbId)) {
+        return { status: 'not_found', message: 'No se pudo identificar el título en TMDB para buscar subtítulos.' };
+    }
+
+    const cacheKey = `${type}_${tmdbId}_${s}_${e}`;
+    let cachedEntry = AUTO_SUB_CACHE.get(cacheKey);
+    const now = Date.now();
+
+    if (!cachedEntry || (now - cachedEntry.ts > 1800000)) {
+        // 2. Resolver imdb_id desde TMDB external_ids
+        let imdbId = null;
+        try {
+            const extRes = await proxyTmdbRequest(`${type}/${tmdbId}/external_ids`, '');
+            const extJson = JSON.parse(extRes.body || '{}');
+            if (extJson && extJson.imdb_id) {
+                imdbId = extJson.imdb_id;
+            }
+        } catch(eExt) {}
+
+        // 3. Consultar proveedores de subtítulos en paralelo:
+        //    A) Archivo local alineado (si existe)
+        //    B) OpenSubtitles v3 Oficial (vía Stremio OpenSubtitles v3 API usando imdb_id)
+        //    C) Framex Subtitle Aggregator (vía TMDB ID)
+        const osUrl = imdbId
+            ? (type === 'tv'
+                ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${s}:${e}.json`
+                : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`)
+            : null;
+        const fmxQ = type === 'tv'
+            ? `type=tv&id=${tmdbId}&season=${s}&episode=${e}&s=${s}&e=${e}`
+            : `type=movie&id=${tmdbId}`;
+        const fmxUrl = `https://api.framextv.tech/api/stream?${fmxQ}`;
+
+        const [osRaw, fmxData] = await safeAll([
+            osUrl ? fetchText(osUrl, { 'Accept': 'application/json' }, 5500) : Promise.resolve(null),
+            fetchFramexCluster(fmxUrl, 5000)
+        ]);
+
+        const esCandidates = [];
+        const enFallbackCandidates = [];
+        const seenRawUrls = new Set();
+
+        // A) Local aligned file
+        const locName = alignedName(type, tmdbId, s, e);
+        const locPath = path.join(SUBTITLES_DIR, locName);
+        if (fs.existsSync(locPath) && !isCorruptedSubFile(locPath)) {
+            const locUrl = `http://${reqHost}/subtitles/${locName}`;
+            esCandidates.push({
+                label: '🎯 Español (Sincronizado Audio)',
+                raw_url: locUrl,
+                url: locUrl,
+                isLocal: true,
+                localPath: locPath
+            });
+            seenRawUrls.add(locUrl);
+        }
+
+        // B) OpenSubtitles v3 results
+        if (osRaw) {
+            try {
+                const osJson = JSON.parse(osRaw);
+                const subs = Array.isArray(osJson.subtitles) ? osJson.subtitles : [];
+                let osEsCount = 0;
+                let osEnCount = 0;
+                for (let i = 0; i < subs.length; i++) {
+                    const sub = subs[i];
+                    if (!sub || !sub.url || seenRawUrls.has(sub.url)) continue;
+                    const lang = String(sub.lang || '').toLowerCase();
+                    if (lang === 'spa' || lang === 'es' || lang === 'spl' || lang === 'spn') {
+                        seenRawUrls.add(sub.url);
+                        osEsCount++;
+                        esCandidates.push({
+                            label: `OpenSubtitles Español #${osEsCount}`,
+                            raw_url: sub.url,
+                            url: `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`
+                        });
+                    } else if ((lang === 'eng' || lang === 'en') && osEnCount < 2) {
+                        osEnCount++;
+                        enFallbackCandidates.push({
+                            label: `Español IA (Traducido de OpenSubtitles #${osEnCount})`,
+                            raw_url: sub.url,
+                            url: `http://${reqHost}/api/sub_translate?url=${encodeURIComponent(sub.url)}`,
+                            needsTranslation: true
+                        });
+                    }
+                }
+            } catch(eOs) {}
+        }
+
+        // C) Framex Subtitles results
+        if (fmxData && Array.isArray(fmxData.subtitles)) {
+            let fmxEsCount = 0;
+            for (let j = 0; j < fmxData.subtitles.length; j++) {
+                const sub = fmxData.subtitles[j];
+                if (!sub || !sub.url || seenRawUrls.has(sub.url)) continue;
+                const langCode = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+                const isEs = /(?:^|[^a-z])(?:spa|spl|spn|es(?:-[a-z0-9]+)?|espa[ñn]ol|spanish|castellano|latino)(?:$|[^a-z])/i.test(langCode);
+                if (isEs) {
+                    seenRawUrls.add(sub.url);
+                    fmxEsCount++;
+                    esCandidates.push({
+                        label: `Framex Español #${fmxEsCount}`,
+                        raw_url: sub.url,
+                        url: `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`
+                    });
+                } else if (/eng|english/i.test(langCode) && enFallbackCandidates.length < 3) {
+                    enFallbackCandidates.push({
+                        label: `Español IA (Traducido de Framex)`,
+                        raw_url: sub.url,
+                        url: `http://${reqHost}/api/sub_translate?url=${encodeURIComponent(sub.url)}`,
+                        needsTranslation: true
+                    });
+                }
+            }
+        }
+
+        cachedEntry = {
+            ts: now,
+            imdbId: imdbId,
+            esCandidates: esCandidates,
+            enFallbackCandidates: enFallbackCandidates,
+            verifiedVttByUrl: new Map()
+        };
+        if (AUTO_SUB_CACHE.size > 60) {
+            const oldest = AUTO_SUB_CACHE.keys().next().value;
+            AUTO_SUB_CACHE.delete(oldest);
+        }
+        AUTO_SUB_CACHE.set(cacheKey, cachedEntry);
+    }
+
+    const pool = cachedEntry.esCandidates.length > 0
+        ? cachedEntry.esCandidates
+        : cachedEntry.enFallbackCandidates;
+
+    if (!pool || pool.length === 0) {
+        return {
+            status: 'not_found',
+            tmdb_id: tmdbId,
+            imdb_id: cachedEntry.imdbId,
+            message: 'No se encontraron subtítulos disponibles para este episodio/película.'
+        };
+    }
+
+    // 4. Probar pistas desde el índice solicitado (con verificación lingüística española garantizada)
+    for (let attempt = 0; attempt < Math.min(pool.length, 6); attempt++) {
+        const idx = (requestedTrack + attempt) % pool.length;
+        const cand = pool[idx];
+        try {
+            let vttContent = cachedEntry.verifiedVttByUrl.get(cand.raw_url);
+            if (!vttContent) {
+                if (cand.isLocal && cand.localPath && fs.existsSync(cand.localPath)) {
+                    vttContent = fs.readFileSync(cand.localPath, 'utf8');
+                } else if (cand.needsTranslation) {
+                    const rawEn = await fetchText(cand.raw_url, {}, 5000);
+                    vttContent = await translateRawSubToSpanishVtt(rawEn);
+                } else {
+                    const rawEs = await fetchText(cand.raw_url, {}, 5000);
+                    vttContent = convertSrtToWebVtt(rawEs);
+                }
+                if (!verifySpanishLinguisticText(vttContent)) {
+                    console.warn(`[AUTO_SUB] Pista rechazada por guardia lingüístico español: ${cand.label}`);
+                    continue;
+                }
+                cachedEntry.verifiedVttByUrl.set(cand.raw_url, vttContent);
+            }
+
+            const tracksOut = pool.map((t, i) => ({
+                index: i,
+                label: t.label,
+                url: t.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`),
+                raw_url: t.raw_url
+            }));
+
+            return {
+                status: 'ok',
+                tmdb_id: tmdbId,
+                imdb_id: cachedEntry.imdbId,
+                selected_index: idx,
+                total_tracks: pool.length,
+                label: cand.label,
+                vtt_url: cand.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`),
+                vtt_content: vttContent,
+                tracks: tracksOut
+            };
+        } catch(eCand) {
+            console.warn(`[AUTO_SUB] Fallo descargando pista ${cand.label}: ${eCand.message}`);
+        }
+    }
+
+    // 5. Si todas las pistas supuestamente en español fallaron el guardia lingüístico y hay pistas en inglés, traducir al vuelo
+    if (cachedEntry.esCandidates.length > 0 && cachedEntry.enFallbackCandidates.length > 0) {
+        try {
+            const fb = cachedEntry.enFallbackCandidates[0];
+            const rawEn = await fetchText(fb.raw_url, {}, 5000);
+            const vttTrans = await translateRawSubToSpanishVtt(rawEn);
+            if (verifySpanishLinguisticText(vttTrans)) {
+                return {
+                    status: 'ok',
+                    tmdb_id: tmdbId,
+                    imdb_id: cachedEntry.imdbId,
+                    selected_index: 0,
+                    total_tracks: 1,
+                    label: fb.label,
+                    vtt_url: fb.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`),
+                    vtt_content: vttTrans,
+                    tracks: [{ index: 0, label: fb.label, url: fb.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`) }]
+                };
+            }
+        } catch(eFb) {}
+    }
+
+    return {
+        status: 'not_found',
+        tmdb_id: tmdbId,
+        imdb_id: cachedEntry.imdbId,
+        message: 'Ninguna pista superó la validación de español.'
+    };
+}
+
 function decorateWithAligned(data, id, type, s, e, reqHost) {
     if (!data || data.status !== 'ok') return data;
     // Si el contenido proviene de Cuevana3c (Latino o Inglés Subtitulado), suprimir subtítulos externos (los subtítulos ya vienen integrados en el video)
@@ -1720,6 +2067,26 @@ const server = http.createServer(async (req, res) => {
             res.end(JSON.stringify(out));
         });
         return;
+    }
+
+    // 8.0 Automated On-Demand Spanish Subtitle Search & Anchor API ($0.00 USD)
+    // Busca, valida lingüísticamente en español y convierte a WebVTT bajo demanda cuando el usuario presiona el botón de subtítulos
+    if (parsed.pathname === '/api/subtitles/auto' || parsed.pathname === '/api/sub_auto') {
+        try {
+            const subRes = await resolveAutoSpanishSubtitle(parsed.query || {}, reqHost);
+            res.writeHead(200, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Cache-Control': 'no-store',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(JSON.stringify(subRes));
+        } catch (errAuto) {
+            res.writeHead(200, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(JSON.stringify({ status: 'error', message: errAuto.message }));
+        }
     }
 
     // 8.1 Subtitle Proxy & SRT-to-WebVTT Transcoder Endpoint (CORS-free + Zero-Desync + Linguistic Guard for webOS)

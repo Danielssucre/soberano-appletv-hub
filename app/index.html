@@ -3932,8 +3932,8 @@
                         <button class="server-pill-btn active" data-srv="direct_native" onclick="switchPlayerServer('direct_native')">⚡ Stream Nativo (0 Anuncios)</button>
                         <button class="server-pill-btn" data-srv="audio_latino" onclick="switchPlayerAudio('spa-latino')">🇲🇽 Audio Latino</button>
                         <button class="server-pill-btn" data-srv="audio_castellano" onclick="switchPlayerAudio('spa-castellano')">🇪🇸 Castellano</button>
-                        <button class="server-pill-btn" data-srv="audio_original" onclick="switchPlayerAudio('eng')">🇺🇸 VO + Sub</button>
-                        <button class="server-pill-btn sub-upload-pill" onclick="triggerSubUpload()" title="Cargar subtítulo externo (.srt / .vtt)"><i class="fa fa-file-arrow-up"></i> +Sub ES</button>
+                        <button class="server-pill-btn" data-srv="audio_original" onclick="switchPlayerAudio('eng')">🇺🇸 VO</button>
+                        <button class="server-pill-btn sub-upload-pill" id="btnAutoSubPill" onclick="onAutoSubPillClick()" title="Buscar y anclar subtítulo en español automáticamente"><i class="fa fa-closed-captioning"></i> +Sub ES</button>
                     </div>
                 </div>
 
@@ -3986,12 +3986,12 @@
                                 <i class="fa fa-expand"></i>
                             </button>
 
-                            <!-- Subtítulos Español CC -->
-                            <button class="btn-ctrl active-sub" id="btnSubToggle" onclick="toggleSubtitles()" title="Subtítulos en español">
-                                <i class="fa fa-closed-captioning"></i> <span id="subStatusText">ES</span>
+                            <!-- Subtítulos Español CC (Desactivado por defecto; busca y ancla en español solo al presionarlo) -->
+                            <button class="btn-ctrl" id="btnSubToggle" onclick="toggleSubtitles()" title="Buscar y anclar subtítulos en español">
+                                <i class="fa fa-closed-captioning"></i> <span id="subStatusText">OFF</span>
                             </button>
                             <!-- Alternar Pista de Subtítulos si hay múltiples -->
-                            <button class="btn-ctrl" id="btnSubTrackSwitch" onclick="switchSpanishSubTrack()" title="Cambiar pista de subtítulos (Pista 1 / Pista 2)" style="display:none; padding:6px 10px; font-size:11px;">
+                            <button class="btn-ctrl" id="btnSubTrackSwitch" onclick="switchSpanishSubTrack()" title="Cambiar pista de subtítulos en español" style="display:none; padding:6px 10px; font-size:11px;">
                                 <i class="fa fa-layer-group"></i> <span id="subTrackText">Pista 1</span>
                             </button>
                         </div>
@@ -4065,8 +4065,8 @@
                             <option value="audio_sub">🇺🇸 Original + Subtítulos Español</option>
                         </select>
                     </div>
-                    <button class="btn-apple-secondary" onclick="triggerSubUpload()" title="Cargar subtítulo externo (.srt / .vtt)"><i class="fa fa-file-arrow-up"></i> Cargar Subtítulo Propio</button>
-                    <span class="sub-es-indicator"><i class="fa fa-check-circle"></i> Solo Español</span>
+                    <button class="btn-apple-secondary" onclick="triggerSubUpload()" title="Cargar subtítulo externo (.srt / .vtt)"><i class="fa fa-file-arrow-up"></i> Subir .SRT</button>
+                    <span class="sub-es-indicator"><i class="fa fa-closed-captioning"></i> Sub ES Bajo Demanda</span>
                 </div>
 
                 <!-- Lista de Episodios -->
@@ -11370,37 +11370,271 @@
         let directServersQueue = [];
         let currentServerIndex = 0;
         let currentSubCues = [];
-        let subtitlesEnabled = true;
+        let subtitlesEnabled = false;
+        let isSearchingAutoSub = false;
+        let currentSubBlobUrl = null;
 
-        function toggleSubtitles() {
-            subtitlesEnabled = !subtitlesEnabled;
+        function updateSubButtonsUI(state = 'off', customPillText = null) {
             const btn = document.getElementById('btnSubToggle');
             const txt = document.getElementById('subStatusText');
-            const overlay = document.getElementById('soberanoSubOverlay');
-            
-            if (video && video.textTracks) {
-                if (subtitlesEnabled) {
-                    enforceSpanishTracks(video);
+            const pill = document.getElementById('btnAutoSubPill');
+            const btnTrack = document.getElementById('btnSubTrackSwitch');
+            const trackText = document.getElementById('subTrackText');
+
+            const totalTracks = (availableSpanishSubs && availableSpanishSubs.length) ? availableSpanishSubs.length : (currentSubCues && currentSubCues.length > 0 ? 1 : 0);
+
+            if (state === 'loading') {
+                if (btn) btn.classList.add('active-sub');
+                if (txt) txt.textContent = '...';
+                if (pill) {
+                    pill.classList.add('active');
+                    pill.innerHTML = `<i class="fa fa-spinner fa-spin"></i> Buscando ES...`;
+                }
+                return;
+            }
+
+            if (state === 'on' || subtitlesEnabled) {
+                if (btn) btn.classList.add('active-sub');
+                if (txt) txt.textContent = 'ES';
+                if (pill) {
+                    pill.classList.add('active');
+                    const pillLabel = customPillText || (totalTracks > 1 ? `Sub ES (${currentSpanishSubIndex + 1}/${totalTracks})` : 'Sub ES Activo');
+                    pill.innerHTML = `<i class="fa fa-check-circle"></i> ${pillLabel}`;
+                }
+                if (btnTrack) {
+                    btnTrack.style.display = totalTracks > 1 ? 'inline-flex' : 'none';
+                    if (trackText) trackText.textContent = `Pista ${currentSpanishSubIndex + 1}/${totalTracks}`;
+                }
+            } else {
+                if (btn) btn.classList.remove('active-sub');
+                if (txt) txt.textContent = 'OFF';
+                if (pill) {
+                    pill.classList.remove('active');
+                    pill.innerHTML = `<i class="fa fa-closed-captioning"></i> +Sub ES`;
+                }
+                if (btnTrack) {
+                    btnTrack.style.display = 'none';
+                }
+            }
+        }
+
+        function renderActiveSubCueNow() {
+            const subOverlay = document.getElementById('soberanoSubOverlay');
+            if (!subOverlay) return;
+            if (!subtitlesEnabled || !currentSubCues || currentSubCues.length === 0) {
+                subOverlay.style.display = 'none';
+                subOverlay.removeAttribute('data-active-text');
+                subOverlay.innerHTML = '';
+                return;
+            }
+            const cur = video ? (video.currentTime || 0) : 0;
+            const activeCue = currentSubCues.find(c => cur >= c.start && cur <= c.end);
+            if (activeCue) {
+                subOverlay.setAttribute('data-active-text', activeCue.text);
+                subOverlay.innerHTML = `<span class="cue-pill">${escapeHtml(activeCue.text)}</span>`;
+                subOverlay.style.display = 'flex';
+            } else {
+                subOverlay.removeAttribute('data-active-text');
+                subOverlay.style.display = 'none';
+                subOverlay.innerHTML = '';
+            }
+        }
+
+        function attachNativeSpanishTrack(vttText) {
+            if (!video || !vttText) return;
+            try {
+                Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
+                if (currentSubBlobUrl) {
+                    try { URL.revokeObjectURL(currentSubBlobUrl); } catch(e) {}
+                    currentSubBlobUrl = null;
+                }
+                const blob = new Blob([vttText], { type: 'text/vtt;charset=utf-8' });
+                currentSubBlobUrl = URL.createObjectURL(blob);
+                const tr = document.createElement('track');
+                tr.id = 'soberanoNativeEsTrack';
+                tr.kind = 'subtitles';
+                tr.srclang = 'es';
+                tr.label = 'Español';
+                tr.src = currentSubBlobUrl;
+                video.appendChild(tr);
+                // En modo inline renderiza soberanoSubOverlay; solo en fullscreen nativo iOS se activa el track nativo
+                enforceSpanishTracks(video);
+            } catch(e) {}
+        }
+
+        async function autoSearchAndAnchorSpanishSub(targetTrackIdx = null) {
+            if (isSearchingAutoSub) return;
+            isSearchingAutoSub = true;
+            updateSubButtonsUI('loading');
+            showToast('🔍 Buscando y anclando subtítulo en español...');
+
+            try {
+                let id = '';
+                let type = 'tv';
+                let s = 1;
+                let e = 1;
+                let title = '';
+                let slug = '';
+
+                if (currentTmdbPlaying && currentTmdbPlaying.item) {
+                    const it = currentTmdbPlaying.item;
+                    id = String(it.tmdb_id || it.id || '');
+                    type = it.media_type || (currentTmdbPlaying.season ? 'tv' : (it.title ? 'movie' : 'tv'));
+                    s = currentTmdbPlaying.season || 1;
+                    e = currentTmdbPlaying.episode || 1;
+                    title = it.title || it.name || it.original_title || it.original_name || '';
+                } else if (activeAnime) {
+                    id = '';
+                    type = 'tv';
+                    s = (activeEpisode && activeEpisode.season) ? activeEpisode.season : 1;
+                    e = (activeEpisode && activeEpisode.episode) ? activeEpisode.episode : 1;
+                    title = activeAnime.title || activeAnime.slug || '';
+                    slug = activeAnime.slug || activeAnime.id || '';
+                }
+
+                const reqTrack = (targetTrackIdx !== null && targetTrackIdx !== undefined) ? targetTrackIdx : 0;
+
+                // 1. Consultar API unificada /api/subtitles/auto del servidor Soberano
+                if (PROXY_BASE) {
+                    const qUrl = `${PROXY_BASE}/api/subtitles/auto?id=${encodeURIComponent(id)}&type=${encodeURIComponent(type)}&s=${s}&e=${e}&title=${encodeURIComponent(title)}&slug=${encodeURIComponent(slug)}&track=${reqTrack}`;
+                    const ctrl = new AbortController();
+                    const timer = setTimeout(() => ctrl.abort(), 11000);
+                    const resp = await fetch(qUrl, { signal: ctrl.signal, cache: 'no-store' });
+                    clearTimeout(timer);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data && data.status === 'ok' && data.vtt_content) {
+                            const parsed = parseVTT(data.vtt_content);
+                            if (parsed && parsed.length >= 3) {
+                                currentSubCues = parsed;
+                                if (currentSubSyncOffset !== 0.0) {
+                                    currentSubCues.forEach(c => {
+                                        c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
+                                        c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
+                                    });
+                                }
+                                if (Array.isArray(data.tracks) && data.tracks.length > 0) {
+                                    availableSpanishSubs = data.tracks;
+                                }
+                                currentSpanishSubIndex = typeof data.selected_index === 'number' ? data.selected_index : 0;
+                                currentCustomSub = data.vtt_url || null;
+                                subtitlesEnabled = true;
+                                attachNativeSpanishTrack(data.vtt_content);
+                                updateSubButtonsUI('on');
+                                renderActiveSubCueNow();
+                                showToast(`✅ Subtítulo Español anclado: ${data.label || 'Español'} (${parsed.length} líneas)`);
+                                isSearchingAutoSub = false;
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                // 2. Fallback en cascada con las pistas candidatas locales/cliente si existen
+                const subCandidates = [];
+                if (availableSpanishSubs && availableSpanishSubs.length > 0) {
+                    for (let k = 0; k < availableSpanishSubs.length; k++) {
+                        const idx = (reqTrack + k) % availableSpanishSubs.length;
+                        const sObj = availableSpanishSubs[idx];
+                        if (sObj && sObj.url) {
+                            subCandidates.push({ url: sObj.url, label: sObj.label || `Español #${idx + 1}`, index: idx });
+                        }
+                    }
+                } else if (currentCustomSub) {
+                    subCandidates.push({ url: currentCustomSub, label: 'Español', index: 0 });
+                }
+
+                for (let i = 0; i < subCandidates.length; i++) {
+                    const cand = subCandidates[i];
+                    try {
+                        let targetSubUrl = cand.url;
+                        if (PROXY_BASE && !targetSubUrl.includes('/api/sub_proxy') && !targetSubUrl.includes('/api/sub_translate') && !targetSubUrl.includes('/subtitles/')) {
+                            targetSubUrl = `${PROXY_BASE}/api/sub_proxy?url=${encodeURIComponent(targetSubUrl)}`;
+                        }
+                        const ctrl2 = new AbortController();
+                        const timer2 = setTimeout(() => ctrl2.abort(), 5000);
+                        const r = await fetch(targetSubUrl, { signal: ctrl2.signal });
+                        clearTimeout(timer2);
+                        if (!r.ok) continue;
+                        const vttText = await r.text();
+                        const parsed = parseVTT(vttText);
+                        if (parsed && parsed.length >= 3) {
+                            currentSubCues = parsed;
+                            currentSpanishSubIndex = cand.index || 0;
+                            if (currentSubSyncOffset !== 0.0) {
+                                currentSubCues.forEach(c => {
+                                    c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
+                                    c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
+                                });
+                            }
+                            subtitlesEnabled = true;
+                            attachNativeSpanishTrack(vttText);
+                            updateSubButtonsUI('on');
+                            renderActiveSubCueNow();
+                            showToast(`✅ Subtítulo Español anclado (${parsed.length} líneas)`);
+                            isSearchingAutoSub = false;
+                            return true;
+                        }
+                    } catch(eSub) {}
+                }
+
+                subtitlesEnabled = false;
+                updateSubButtonsUI('off');
+                showToast('⚠️ No se encontraron subtítulos externos en español para este título');
+            } catch (err) {
+                console.warn('[AUTO_SUB_ANCHOR] Error:', err);
+                subtitlesEnabled = false;
+                updateSubButtonsUI('off');
+                showToast('⚠️ Error buscando subtítulos en español');
+            }
+            isSearchingAutoSub = false;
+            return false;
+        }
+
+        function onAutoSubPillClick() {
+            if (!subtitlesEnabled) {
+                if (currentSubCues && currentSubCues.length > 0) {
+                    subtitlesEnabled = true;
+                    updateSubButtonsUI('on');
+                    renderActiveSubCueNow();
+                    showToast(`✅ Subtítulo en español anclado (${currentSubCues.length} líneas)`);
                 } else {
+                    autoSearchAndAnchorSpanishSub(0);
+                }
+            } else {
+                // Si ya están activos y el usuario vuelve a tocar el botón +Sub ES, si hay más pistas cambia a la siguiente; si no, los desactiva
+                if (availableSpanishSubs && availableSpanishSubs.length > 1) {
+                    autoSearchAndAnchorSpanishSub((currentSpanishSubIndex + 1) % availableSpanishSubs.length);
+                } else {
+                    toggleSubtitles();
+                }
+            }
+        }
+
+        function toggleSubtitles() {
+            if (!subtitlesEnabled) {
+                // El usuario presionó el botón para ACTIVAR subtítulos:
+                // Si aún no se han descargado, buscarlos y anclarlos automáticamente en español
+                if (!currentSubCues || currentSubCues.length === 0) {
+                    autoSearchAndAnchorSpanishSub(0);
+                    return;
+                }
+                subtitlesEnabled = true;
+                updateSubButtonsUI('on');
+                renderActiveSubCueNow();
+                if (video && video.textTracks) enforceSpanishTracks(video);
+                showToast(`✅ Subtítulos en español anclados (${currentSubCues.length} líneas)`);
+            } else {
+                // El usuario presionó el botón para DESACTIVAR subtítulos
+                subtitlesEnabled = false;
+                updateSubButtonsUI('off');
+                renderActiveSubCueNow();
+                if (video && video.textTracks) {
                     for (let i = 0; i < video.textTracks.length; i++) {
                         video.textTracks[i].mode = 'disabled';
                     }
                 }
-            }
-
-            if (subtitlesEnabled) {
-                if (btn) btn.classList.add('active-sub');
-                if (txt) txt.textContent = 'ES';
-                showToast('Subtítulos en español activados');
-            } else {
-                if (btn) btn.classList.remove('active-sub');
-                if (txt) txt.textContent = 'OFF';
-                if (overlay) {
-                    overlay.style.display = 'none';
-                    overlay.removeAttribute('data-active-text');
-                    overlay.innerHTML = '';
-                }
-                showToast('Subtítulos desactivados');
+                showToast('💬 Subtítulos desactivados');
             }
         }
 
@@ -11565,8 +11799,14 @@
         }
 
         async function launchEpisodePlayback(anime, episode, resumeTime = 0) {
+            currentTmdbPlaying = null;
             activeAnime = anime;
             activeEpisode = episode;
+            subtitlesEnabled = false;
+            currentSubCues = [];
+            availableSpanishSubs = [];
+            currentSpanishSubIndex = 0;
+            updateSubButtonsUI('off');
 
             const modal = document.getElementById('playerModal');
             document.getElementById('playerSeriesTitle').textContent = anime.title;
@@ -11611,8 +11851,9 @@
                     });
                 }
 
-                // Gestión Dual de Subtítulos (DOM Overlay Anti-Colisión + Track Nativo)
+                // Gestión Bajo Demanda de Subtítulos (Solo se activan si el usuario presiona el botón)
                 currentSubCues = [];
+                subtitlesEnabled = false;
                 const subOverlay = document.getElementById('soberanoSubOverlay');
                 if (subOverlay) {
                     subOverlay.style.display = 'none';
@@ -11630,20 +11871,10 @@
                 }
 
                 if (subUrlToLoad) {
-                    console.log(`[SOBERANO SUB] Cargando subtítulos para ${slug} ep ${epNum}: ${subUrlToLoad}`);
-                    fetch(subUrlToLoad, { cache: 'no-store' })
-                        .then(r => {
-                            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                            return r.text();
-                        })
-                        .then(vttText => {
-                            currentSubCues = parseVTT(vttText);
-                            console.log(`[SOBERANO SUB] Cargados exitosamente ${currentSubCues.length} subtítulos (${subLabel}).`);
-                        })
-                        .catch(err => {
-                            console.warn('[SOBERANO SUB] Error cargando VTT overlay:', err);
-                        });
+                    availableSpanishSubs = [{ index: 0, label: subLabel, url: subUrlToLoad }];
+                    currentCustomSub = subUrlToLoad;
                 }
+                updateSubButtonsUI('off');
             } catch(e) {
                 console.warn('Error resolviendo stream_info:', e);
             }
@@ -13649,7 +13880,12 @@
         }
 
         async function launchTmdbPlayback(item, season = null, episode = null, server = 'direct_native', customSub = null) {
+            activeAnime = null;
+            activeEpisode = null;
             currentTmdbPlaying = { item, season, episode, server };
+            subtitlesEnabled = false;
+            currentSubCues = [];
+            updateSubButtonsUI('off');
             const type = item.media_type || (season ? 'tv' : (item.title ? 'movie' : 'tv'));
             const s = season || 1;
             const e = episode || 1;
@@ -13790,11 +14026,14 @@
                     fallbackIframe.src = 'about:blank';
                 }
 
-                // SOBERANO SUBTITLES ENGINE: Inyectar subtítulo en Español WebVTT con doble capa (Overlay visual + Track local)
+                // SOBERANO SUBTITLES ENGINE (MODO MANUAL BAJO DEMANDA):
+                // Subtítulos desactivados por defecto al iniciar para evitar duplicidad en series que ya traen subtítulos.
+                // Solo se buscan, descargan y anclan en español cuando el usuario presiona el botón de subtítulos.
                 Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
                 currentSubCues = [];
+                subtitlesEnabled = false;
                 
-                // Recuperar ajuste manual guardado (clave distinta si el subtitulo ya viene sincronizado con el audio)
+                // Recuperar ajuste manual guardado
                 let savedOffset = 0.0;
                 try {
                     const sv = parseFloat(localStorage.getItem((currentSubAligned ? 'sub_offset_al_tmdb_' : 'sub_offset_tmdb_') + item.id));
@@ -13804,103 +14043,31 @@
                 const badge = document.getElementById('subSyncBadge');
                 if (badge) badge.textContent = (currentSubSyncOffset >= 0 ? '+' : '') + currentSubSyncOffset.toFixed(1) + 's';
 
-                const btnTrack = document.getElementById('btnSubTrackSwitch');
-                if (btnTrack) {
-                    btnTrack.style.display = (availableSpanishSubs && availableSpanishSubs.length > 1) ? 'inline-block' : 'none';
-                    const trackText = document.getElementById('subTrackText');
-                    if (trackText) trackText.textContent = `Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length || 1}`;
-                }
-
                 const subOverlayEl = document.getElementById('soberanoSubOverlay');
                 if (subOverlayEl) {
                     subOverlayEl.style.display = 'none';
                     subOverlayEl.removeAttribute('data-active-text');
                     subOverlayEl.innerHTML = '';
                 }
+                updateSubButtonsUI('off');
 
-                // Construir cola resiliente de subtítulos (Auto-Failover en Cascada)
-                const subCandidates = [];
-                if (currentCustomSub) subCandidates.push({ url: currentCustomSub, label: 'Principal' });
-                if (availableSpanishSubs && availableSpanishSubs.length > 0) {
-                    availableSpanishSubs.forEach((sObj, idx) => {
-                        if (sObj.url && !subCandidates.some(c => c.url === sObj.url)) {
-                            subCandidates.push({ url: sObj.url, label: sObj.label || `Español #${idx + 1}`, index: idx });
-                        }
-                    });
-                }
-
-                if (subCandidates.length > 0) {
-                    (async () => {
-                        let loadedCues = [];
-                        let loadedIdx = 0;
-                        for (let i = 0; i < subCandidates.length; i++) {
-                            const cand = subCandidates[i];
-                            try {
-                                const ctrl = new AbortController();
-                                const timer = setTimeout(() => ctrl.abort(), 4500);
-                                let targetSubUrl = cand.url;
-                                // Si no pasa ya por el proxy local, enrutar por /api/sub_proxy para evitar bloqueos CORS/SRT
-                                if (PROXY_BASE && !targetSubUrl.includes('/api/sub_proxy') && !targetSubUrl.includes('/api/sub_translate') && !targetSubUrl.includes('/subtitles/')) {
-                                    targetSubUrl = `${PROXY_BASE}/api/sub_proxy?url=${encodeURIComponent(targetSubUrl)}`;
-                                }
-                                const r = await fetch(targetSubUrl, { signal: ctrl.signal });
-                                clearTimeout(timer);
-                                if (!r.ok) continue;
-                                const vttText = await r.text();
-                                const parsed = parseVTT(vttText);
-                                if (parsed && parsed.length >= 5) {
-                                    loadedCues = parsed;
-                                    loadedIdx = (typeof cand.index === 'number') ? cand.index : i;
-                                    currentCustomSub = targetSubUrl;
-                                    break;
-                                }
-                            } catch(eSub) {
-                                console.warn(`[SOBERANO SUB FAILOVER] Falló pista ${i + 1} (${cand.label}), probando siguiente...`, eSub.message);
-                            }
-                        }
-
-                        if (loadedCues.length > 0) {
-                            currentSubCues = loadedCues;
-                            currentSpanishSubIndex = loadedIdx;
-                            const trackText = document.getElementById('subTrackText');
-                            if (trackText && availableSpanishSubs.length > 1) {
-                                trackText.textContent = `Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length}`;
-                            }
-                            if (currentSubSyncOffset !== 0.0) {
-                                currentSubCues.forEach(c => {
-                                    c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
-                                    c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
-                                });
-                            }
-
-                            // REGLA DE ORO LINGÜÍSTICA:
-                            // Si el audio ya viene en Español (obra original o doblaje español), subtítulos OFF por defecto.
-                            // Si el audio está en su idioma real (Inglés, Japonés, Francés, etc.), subtítulos ES ON por defecto.
-                            const isStreamEnglish = (resolvedDataObj && resolvedDataObj.direct_stream_url && resolvedDataObj.direct_stream_url.toLowerCase().includes('the+awakening'));
-                            const hasSpanishAudio = !isStreamEnglish && ((resolvedDataObj && resolvedDataObj.audio_es) || (item.original_language === 'es'));
-                            const btnSub = document.getElementById('btnSubToggle');
-                            const txtSub = document.getElementById('subStatusText');
-
-                            if (hasSpanishAudio) {
-                                subtitlesEnabled = false;
-                                if (subOverlayEl) subOverlayEl.style.display = 'none';
-                                if (btnSub) btnSub.classList.remove('active-sub');
-                                if (txtSub) txtSub.textContent = 'OFF';
-                                console.log(`[SOBERANO SUB] Audio en Español detectado. Subtítulos desactivados por defecto.`);
-                            } else {
+                // Si el usuario subió manualmente un archivo propio antes de reproducir, anclarlo
+                if (window.isUserUploadedSub && customSub) {
+                    window.isUserUploadedSub = false;
+                    fetch(customSub)
+                        .then(r => r.text())
+                        .then(vttText => {
+                            const parsed = parseVTT(vttText);
+                            if (parsed && parsed.length > 0) {
+                                currentSubCues = parsed;
                                 subtitlesEnabled = true;
-                                if (subOverlayEl) subOverlayEl.style.display = 'flex';
-                                if (btnSub) btnSub.classList.add('active-sub');
-                                if (txtSub) txtSub.textContent = 'ES';
-                                console.log(`[SOBERANO SUB] Idioma original (${item.original_language || 'VO'}). Subtítulos en español ACTIVADOS: ${currentSubCues.length} líneas.`);
+                                attachNativeSpanishTrack(vttText);
+                                updateSubButtonsUI('on', 'Subido ES');
+                                renderActiveSubCueNow();
                             }
-                        } else {
-                            console.warn('[SOBERANO SUB] Ninguna pista candidata devolvió subtítulos válidos.');
-                        }
-                    })();
+                        })
+                        .catch(() => {});
                 }
-
-                if (tmdbAligning) startAlignmentPolling(item, type, s, e);
 
                 executeTmdbDirectPlayback(0, 0);
                 return;
@@ -13930,7 +14097,12 @@
                 html += `<button class="server-pill-btn ${isAct}" onclick="executeTmdbDirectPlayback(${idx}, video.currentTime || 0)">${audioTag}${shortName} (${qTag})</button>`;
             });
 
-            html += `<button class="server-pill-btn sub-upload-pill" onclick="triggerSubUpload()" title="Cargar subtítulo externo (.srt / .vtt)"><i class="fa fa-file-arrow-up"></i> +Sub ES</button>`;
+            const totalTracks = (availableSpanishSubs && availableSpanishSubs.length) ? availableSpanishSubs.length : (currentSubCues && currentSubCues.length > 0 ? 1 : 0);
+            const subPillActive = subtitlesEnabled ? 'active' : '';
+            const subPillLabel = subtitlesEnabled
+                ? `<i class="fa fa-check-circle"></i> ${totalTracks > 1 ? `Sub ES (${currentSpanishSubIndex + 1}/${totalTracks})` : 'Sub ES Activo'}`
+                : `<i class="fa fa-closed-captioning"></i> +Sub ES`;
+            html += `<button class="server-pill-btn sub-upload-pill ${subPillActive}" id="btnAutoSubPill" onclick="onAutoSubPillClick()" title="Buscar y anclar subtítulo en español automáticamente">${subPillLabel}</button>`;
             pillsContainer.innerHTML = html;
         }
 
@@ -14109,23 +14281,18 @@
             const txtSub = document.getElementById('subStatusText');
 
             if (isSpanish) {
-                // REGLA SUPREMA: Con Audio en Español, no hay necesidad de subtítulos
+                // Con Audio en Español, subtítulos desactivados
                 subtitlesEnabled = false;
-                if (subOverlayEl) {
-                    subOverlayEl.style.display = 'none';
-                    subOverlayEl.removeAttribute('data-active-text');
-                    subOverlayEl.innerHTML = '';
-                }
-                if (btnSub) btnSub.classList.remove('active-sub');
-                if (txtSub) txtSub.textContent = 'OFF';
+                updateSubButtonsUI('off');
+                renderActiveSubCueNow();
             } else {
-                // Versión Original (Inglés / Japonés / VO): Subtítulos en Español automáticos
-                subtitlesEnabled = true;
-                if (subOverlayEl && currentSubCues && currentSubCues.length > 0) {
-                    subOverlayEl.style.display = 'flex';
+                // Mantener el estado de subtítulos elegido manualmente por el usuario
+                if (subtitlesEnabled) {
+                    updateSubButtonsUI('on');
+                    renderActiveSubCueNow();
+                } else {
+                    updateSubButtonsUI('off');
                 }
-                if (btnSub) btnSub.classList.add('active-sub');
-                if (txtSub) txtSub.textContent = 'ES';
             }
 
             // Conmutación en motor Hls.js si está activo
@@ -14296,67 +14463,34 @@
         }
 
         async function switchSpanishSubTrack() {
-            if (!availableSpanishSubs || availableSpanishSubs.length <= 1) {
-                showToast('Sólo hay 1 pista de subtítulos en español disponible');
-                return;
-            }
-            for (let attempt = 0; attempt < availableSpanishSubs.length; attempt++) {
-                currentSpanishSubIndex = (currentSpanishSubIndex + 1) % availableSpanishSubs.length;
-                const targetSub = availableSpanishSubs[currentSpanishSubIndex];
-                showToast(`Cambiando a Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length}: ${targetSub.label || 'Español'}...`);
-                try {
-                    let targetSubUrl = targetSub.url;
-                    if (PROXY_BASE && !targetSubUrl.includes('/api/sub_proxy') && !targetSubUrl.includes('/api/sub_translate') && !targetSubUrl.includes('/subtitles/')) {
-                        targetSubUrl = `${PROXY_BASE}/api/sub_proxy?url=${encodeURIComponent(targetSubUrl)}`;
-                    }
-                    const ctrl = new AbortController();
-                    const timer = setTimeout(() => ctrl.abort(), 4500);
-                    const r = await fetch(targetSubUrl, { signal: ctrl.signal });
-                    clearTimeout(timer);
-                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                    const vtt = await r.text();
-                    const parsed = parseVTT(vtt);
-                    if (!parsed || parsed.length < 5) throw new Error('Pista vacía');
-                    currentSubCues = parsed;
-                    if (currentSubSyncOffset !== 0.0) {
-                        currentSubCues.forEach(c => {
-                            c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
-                            c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
-                        });
-                    }
-                    subtitlesEnabled = true;
-                    const subOverlayEl = document.getElementById('soberanoSubOverlay');
-                    if (subOverlayEl) subOverlayEl.style.display = 'flex';
-                    const btnSub = document.getElementById('btnSubToggle');
-                    if (btnSub) btnSub.classList.add('active-sub');
-                    const txtSub = document.getElementById('subStatusText');
-                    if (txtSub) txtSub.textContent = 'ES';
-                    const trackText = document.getElementById('subTrackText');
-                    if (trackText) trackText.textContent = `Pista ${currentSpanishSubIndex + 1}/${availableSpanishSubs.length}`;
-                    showToast(`✅ Pista ${currentSpanishSubIndex + 1} activa (${currentSubCues.length} subtítulos)`);
-                    return;
-                } catch(e) {
-                    console.warn(`Error en pista ${currentSpanishSubIndex + 1}:`, e.message);
-                }
-            }
-            showToast('⚠️ No se encontraron más pistas operativas');
+            const total = (availableSpanishSubs && availableSpanishSubs.length) ? availableSpanishSubs.length : 1;
+            const nextIdx = (currentSpanishSubIndex + 1) % Math.max(1, total);
+            await autoSearchAndAnchorSpanishSub(nextIdx);
         }
 
         function enforceSpanishTracks(videoEl) {
             // SOBERANO ANTI-DUPLICATION SHIELD:
-            // Todos los subtítulos se pintan en la capa DOM 'soberanoSubOverlay'.
-            // Jamás permitir que el navegador webOS ni Hls.js pinten pistas nativas encima (en italiano/inglés/duplicado).
+            // En pantalla inline todos los subtítulos se pintan en la capa DOM 'soberanoSubOverlay'.
+            // Solo si iOS Safari está en pantalla completa nativa (webkitDisplayingFullscreen) y el usuario activó subtítulos, habilitar nuestro track ES.
             if (hlsPlayer) {
                 hlsPlayer.subtitleDisplay = false;
                 if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
             }
             if (!videoEl || !videoEl.textTracks) return;
+            const isIosFullscreen = !!videoEl.webkitDisplayingFullscreen;
             for (let i = 0; i < videoEl.textTracks.length; i++) {
-                videoEl.textTracks[i].mode = 'disabled';
+                const tr = videoEl.textTracks[i];
+                if (isIosFullscreen && subtitlesEnabled && (tr.language === 'es' || tr.label === 'Español')) {
+                    tr.mode = 'showing';
+                } else {
+                    tr.mode = 'disabled';
+                }
             }
         }
         if (typeof video !== 'undefined' && video) {
             video.addEventListener('loadedmetadata', () => enforceSpanishTracks(video));
+            video.addEventListener('webkitbeginfullscreen', () => enforceSpanishTracks(video));
+            video.addEventListener('webkitendfullscreen', () => enforceSpanishTracks(video));
             if (video.textTracks) {
                 video.textTracks.addEventListener('addtrack', () => enforceSpanishTracks(video));
             }
