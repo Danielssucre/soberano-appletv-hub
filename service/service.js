@@ -203,6 +203,15 @@ const CATALOG_CACHE = new Map(); // max 60 entries
 const SEARCH_CACHE = new Map();  // max 40 entries
 const ANIME_CACHE = new Map();   // max 100 entries
 
+async function fetchJson(targetUrl, customHeaders = {}, timeoutMs = 6500) {
+    const raw = await fetchText(targetUrl, customHeaders, timeoutMs);
+    try {
+        return JSON.parse(raw);
+    } catch(e) {
+        return null;
+    }
+}
+
 function fetchText(targetUrl, customHeaders = {}, timeoutMs = 6500) {
     return new Promise((resolve, reject) => {
         try {
@@ -683,95 +692,117 @@ async function translateRawSubToSpanishVtt(rawSub) {
 }
 
 async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
-    let tmdbId = String(params.id || '').trim();
-    let type = (params.type === 'movie' || params.type === 'tv') ? params.type : (params.s || params.season || params.e || params.episode ? 'tv' : 'movie');
+    let rawId = String(params.id || params.imdb_id || "").trim();
+    let tmdbId = /^\d+$/.test(rawId) ? rawId : "";
+    let imdbId = rawId.startsWith("tt") ? rawId : (String(params.imdb_id || "").startsWith("tt") ? String(params.imdb_id).trim() : "");
+    let type = (params.type === "movie" || params.type === "tv") ? params.type : (params.s || params.season || params.e || params.episode ? "tv" : "movie");
     const s = parseInt(params.s || params.season || 1, 10) || 1;
     const e = parseInt(params.e || params.episode || 1, 10) || 1;
-    const title = String(params.title || '').trim();
-    const slug = String(params.slug || '').trim();
+    const title = String(params.title || "").trim();
+    const slug = String(params.slug || "").trim();
     const requestedTrack = Math.max(0, parseInt(params.track || 0, 10) || 0);
 
     // 0. Verificar si es Ninku o si hay subtítulo local pre-sincronizado en disco
-    if (slug === 'ninku' || title.toLowerCase().includes('ninku')) {
-        const epPad = String(e).padStart(2, '0');
+    if (slug === "ninku" || title.toLowerCase().includes("ninku")) {
+        const epPad = String(e).padStart(2, "0");
         const ninkuFile = `ninku_ep${epPad}_es.vtt`;
         const ninkuPath = path.join(SUBTITLES_DIR, ninkuFile);
         if (fs.existsSync(ninkuPath)) {
-            const vttContent = fs.readFileSync(ninkuPath, 'utf8');
+            const vttContent = fs.readFileSync(ninkuPath, "utf8");
             const vttUrl = `${reqProto}://${reqHost}/subtitles/${ninkuFile}`;
             return {
-                status: 'ok',
-                tmdb_id: tmdbId || 'ninku',
+                status: "ok",
+                tmdb_id: tmdbId || "ninku",
                 imdb_id: null,
                 selected_index: 0,
                 total_tracks: 1,
-                label: 'Español Oficial (Ninku)',
+                label: "Español Oficial (Ninku)",
                 vtt_url: vttUrl,
                 vtt_content: vttContent,
-                tracks: [{ index: 0, label: 'Español Oficial (Ninku)', url: vttUrl }]
+                tracks: [{ index: 0, label: "Español Oficial (Ninku)", url: vttUrl }]
             };
         }
     }
 
-    // 1. Si no tenemos un ID numérico de TMDB (ej. Anime o búsqueda por título), resolverlo en TMDB
-    if ((!tmdbId || !/^\d+$/.test(tmdbId)) && title) {
+    // 1. Si tenemos imdb_id pero no tmdbId numérico, resolver tmdbId con find/
+    if (imdbId && !tmdbId) {
         try {
-            const cleanTitle = title.replace(/\b(?:season|temporada|part|parte)\s*\d+/gi, '').replace(/[^\w\sáéíóúñÁÉÍÓÚÑ]/g, ' ').trim();
-            const searchPath = type === 'movie' ? 'search/movie' : 'search/tv';
+            const findRes = await proxyTmdbRequest(`find/${imdbId}`, "external_source=imdb_id");
+            const findJson = JSON.parse(findRes.body || "{}");
+            const foundMovie = findJson.movie_results && findJson.movie_results[0];
+            const foundTv = findJson.tv_results && findJson.tv_results[0];
+            if (foundMovie) {
+                tmdbId = String(foundMovie.id);
+                type = "movie";
+            } else if (foundTv) {
+                tmdbId = String(foundTv.id);
+                type = "tv";
+            }
+        } catch(eFind) {
+            console.warn("[AUTO_SUB] Error resolviendo tmdbId desde imdbId:", eFind.message);
+        }
+    }
+
+    // 2. Si no tenemos ni tmdbId ni imdbId, buscar en TMDB por título
+    if (!tmdbId && !imdbId && title) {
+        try {
+            const cleanTitle = title.replace(/\b(?:season|temporada|part|parte)\s*\d+/gi, "").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ]/g, " ").trim();
+            const searchPath = type === "movie" ? "search/movie" : "search/tv";
             const sRes = await proxyTmdbRequest(searchPath, `query=${encodeURIComponent(cleanTitle)}&language=es-MX`);
-            const sJson = JSON.parse(sRes.body || '{}');
+            const sJson = JSON.parse(sRes.body || "{}");
             if (sJson.results && sJson.results.length > 0) {
                 tmdbId = String(sJson.results[0].id);
             } else {
-                const mRes = await proxyTmdbRequest('search/multi', `query=${encodeURIComponent(cleanTitle)}&language=es-MX`);
-                const mJson = JSON.parse(mRes.body || '{}');
-                const validHit = (mJson.results || []).find(r => r.media_type === 'tv' || r.media_type === 'movie');
+                const mRes = await proxyTmdbRequest("search/multi", `query=${encodeURIComponent(cleanTitle)}&language=es-MX`);
+                const mJson = JSON.parse(mRes.body || "{}");
+                const validHit = (mJson.results || []).find(r => r.media_type === "tv" || r.media_type === "movie");
                 if (validHit) {
                     tmdbId = String(validHit.id);
                     type = validHit.media_type;
                 }
             }
         } catch(eSearch) {
-            console.warn('[AUTO_SUB] Error buscando título en TMDB:', eSearch.message);
+            console.warn("[AUTO_SUB] Error buscando título en TMDB:", eSearch.message);
         }
     }
 
-    if (!tmdbId || !/^\d+$/.test(tmdbId)) {
-        return { status: 'not_found', message: 'No se pudo identificar el título en TMDB para buscar subtítulos.' };
-    }
-
-    const cacheKey = `${type}_${tmdbId}_${s}_${e}`;
-    let cachedEntry = AUTO_SUB_CACHE.get(cacheKey);
-    const now = Date.now();
-
-    if (!cachedEntry || (now - cachedEntry.ts > 1800000)) {
-        // 2. Resolver imdb_id desde TMDB external_ids
-        let imdbId = null;
+    // Si aún no tenemos imdbId pero sí tmdbId, obtener imdbId de external_ids
+    if (tmdbId && !imdbId) {
         try {
-            const extRes = await proxyTmdbRequest(`${type}/${tmdbId}/external_ids`, '');
-            const extJson = JSON.parse(extRes.body || '{}');
+            const extRes = await proxyTmdbRequest(`${type}/${tmdbId}/external_ids`, "");
+            const extJson = JSON.parse(extRes.body || "{}");
             if (extJson && extJson.imdb_id) {
                 imdbId = extJson.imdb_id;
             }
         } catch(eExt) {}
+    }
 
-        // 3. Consultar proveedores de subtítulos en paralelo:
+    if (!tmdbId && !imdbId) {
+        return { status: "not_found", message: "No se pudo identificar el título en TMDB/IMDb para buscar subtítulos." };
+    }
+
+    const cacheKey = `${type}_${imdbId || tmdbId}_${s}_${e}`;
+    let cachedEntry = AUTO_SUB_CACHE.get(cacheKey);
+    const now = Date.now();
+
+    if (!cachedEntry || (now - cachedEntry.ts > 1800000)) {
+        // Consultar proveedores de subtítulos en paralelo:
         //    A) Archivo local alineado (si existe)
         //    B) OpenSubtitles v3 Oficial (vía Stremio OpenSubtitles v3 API usando imdb_id)
-        //    C) Framex Subtitle Aggregator (vía TMDB ID)
+        //    C) Framex Subtitle Aggregator (vía TMDB ID si está disponible)
         const osUrl = imdbId
-            ? (type === 'tv'
+            ? (type === "tv"
                 ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${s}:${e}.json`
                 : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`)
             : null;
-        const fmxQ = type === 'tv'
+        const fmxQ = type === "tv"
             ? `type=tv&id=${tmdbId}&season=${s}&episode=${e}&s=${s}&e=${e}`
             : `type=movie&id=${tmdbId}`;
-        const fmxUrl = `https://api.framextv.tech/api/stream?${fmxQ}`;
+        const fmxUrl = tmdbId ? `https://api.framextv.tech/api/stream?${fmxQ}` : null;
 
         const [osRaw, fmxData] = await safeAll([
-            osUrl ? fetchText(osUrl, { 'Accept': 'application/json' }, 5500) : Promise.resolve(null),
-            fetchFramexCluster(fmxUrl, 5000)
+            osUrl ? fetchText(osUrl, { "Accept": "application/json" }, 5500) : Promise.resolve(null),
+            fmxUrl ? fetchFramexCluster(fmxUrl, 5000) : Promise.resolve(null)
         ]);
 
         const esCandidates = [];
@@ -839,13 +870,13 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                     esCandidates.push({
                         label: `Framex Español #${fmxEsCount}`,
                         raw_url: sub.url,
-                        url: `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`
+                        url: `${reqProto}://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`
                     });
                 } else if (/eng|english/i.test(langCode) && enFallbackCandidates.length < 3) {
                     enFallbackCandidates.push({
                         label: `Español IA (Traducido de Framex)`,
                         raw_url: sub.url,
-                        url: `http://${reqHost}/api/sub_translate?url=${encodeURIComponent(sub.url)}`,
+                        url: `${reqProto}://${reqHost}/api/sub_translate?url=${encodeURIComponent(sub.url)}`,
                         needsTranslation: true
                     });
                 }
@@ -1805,6 +1836,188 @@ function resolveNinku(epNum, reqHost, reqProto = "http") {
 }
 
 // ==============================================================================
+// 4.5. SOBERANO PHANTOM-SWARM ENGINE (Universal Torrents on HTTPS Port 443)
+// ==============================================================================
+const SOBERANO_CACHE = new Map();
+const SOBERANO_STREAMS_CACHE = new Map();
+
+function cleanTorrentTitle(rawTitle) {
+    if (!rawTitle) return '';
+    return rawTitle
+        .replace(/\b(2160p|1080p|720p|480p|4k|uhd|bluray|bdrip|brrip|web-dl|webrip|hdr10\+|hdr10|hdr|dv|dovi|dolby vision|atmos|truehd|dts-hd|dts|ddp5\.1|dd5\.1|ac3|aac|x264|x265|hevc|h\.264|h\.265|av1|remux|proper|repack|imax)\b/gi, '')
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[._-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function parseTorrentStream(stream) {
+    const rawTitle = stream.title || '';
+    const name = stream.name || 'Torrentio';
+    const lines = rawTitle.split('\n');
+    const firstLine = lines[0] || '';
+    const detailsLine = lines[1] || '';
+
+    // Extracción de resolución
+    let quality = 'HD';
+    if (/4k|2160p/i.test(name) || /4k|2160p/i.test(firstLine)) quality = '4K';
+    else if (/1080p/i.test(name) || /1080p/i.test(firstLine)) quality = '1080p';
+    else if (/720p/i.test(name) || /720p/i.test(firstLine)) quality = '720p';
+
+    // Extracción de Seeders (👤)
+    const seedMatch = rawTitle.match(/👤\s*(\d+)/);
+    const seeds = seedMatch ? parseInt(seedMatch[1], 10) : 0;
+
+    // Extracción de Tamaño (💾)
+    const sizeMatch = rawTitle.match(/💾\s*([\d.]+\s*(?:GB|MB|TB))/i);
+    const size = sizeMatch ? sizeMatch[1].trim() : '';
+
+    // Extracción de Fuente/Tracker (⚙️)
+    const trackerMatch = rawTitle.match(/⚙️\s*([^\n]+)/);
+    const tracker = trackerMatch ? trackerMatch[1].trim() : '';
+
+    // Detección de Idioma
+    const isEs = /🇪🇸|🇲🇽|\b(spa|latino|castellano|spanish|es)\b/i.test(rawTitle);
+    const isDual = /\b(dual|multi|multi-audio|multi-subs|dub)\b/i.test(rawTitle);
+
+    // Detección de HDR / Dolby Vision
+    const isHdr = /\b(hdr|hdr10|hdr10\+|dv|dolby vision)\b/i.test(rawTitle) || /\b(hdr|dv)\b/i.test(name);
+
+    // Nombre de archivo y contenedor
+    const fn = (stream.behaviorHints && stream.behaviorHints.filename) ? stream.behaviorHints.filename : firstLine;
+    const isMp4 = fn.toLowerCase().endsWith('.mp4');
+
+    return {
+        name: name.replace(/\n/g, ' ').trim(),
+        title: firstLine.trim(),
+        full_title: rawTitle,
+        infoHash: stream.infoHash,
+        fileIdx: stream.fileIdx !== undefined ? stream.fileIdx : 0,
+        quality: quality,
+        seeds: seeds,
+        size: size,
+        tracker: tracker,
+        is_es: isEs,
+        is_dual: isDual,
+        is_hdr: isHdr,
+        is_mp4: isMp4,
+        filename: fn
+    };
+}
+
+async function searchSoberanoCatalog(query) {
+    const qTrim = String(query || '').trim();
+    if (!qTrim) return [];
+
+    const cacheKey = `sob_q_${qTrim.toLowerCase()}`;
+    if (SOBERANO_CACHE.has(cacheKey)) {
+        return SOBERANO_CACHE.get(cacheKey);
+    }
+
+    const enc = encodeURIComponent(qTrim);
+    // Búsqueda cruzada en Cinemeta (Películas, Series y Anime)
+    const endpoints = [
+        `https://v3-cinemeta.strem.io/catalog/movie/top/search=${enc}.json`,
+        `https://v3-cinemeta.strem.io/catalog/series/top/search=${enc}.json`
+    ];
+
+    try {
+        const results = await safeAll(endpoints.map(u => fetchJson(u, {}, 5000)));
+        const combined = [];
+        const seenIds = new Set();
+
+        results.forEach(res => {
+            if (res && Array.isArray(res.metas)) {
+                res.metas.forEach(m => {
+                    if (m && m.id && !seenIds.has(m.id)) {
+                        seenIds.add(m.id);
+                        combined.push({
+                            id: m.id,
+                            imdb_id: m.imdb_id || m.id,
+                            type: m.type === 'series' ? 'tv' : 'movie',
+                            title: m.name,
+                            poster: m.poster,
+                            backdrop: m.background,
+                            year: m.releaseInfo || m.year || '',
+                            description: m.description || '',
+                            genres: m.genres || []
+                        });
+                    }
+                });
+            }
+        });
+
+        SOBERANO_CACHE.set(cacheKey, combined);
+        return combined;
+    } catch (e) {
+        console.warn('[SOBERANO_CATALOG] Error:', e.message);
+        return [];
+    }
+}
+
+async function getSoberanoTorrentStreams(id, type = 'movie', s = 1, e = 1) {
+    let imdbId = String(id || '').trim();
+    const isTv = type === 'tv' || type === 'series';
+
+    // Si viene como TMDB ID numérico, resolver IMDB ID primero
+    if (/^\d+$/.test(imdbId)) {
+        try {
+            const extRes = await proxyTmdbRequest(`${isTv ? 'tv' : 'movie'}/${imdbId}/external_ids`, '');
+            const extData = JSON.parse(extRes.body);
+            if (extData.imdb_id) imdbId = extData.imdb_id;
+        } catch(e) {}
+    }
+
+    const streamId = isTv ? `${imdbId}:${s}:${e}` : imdbId;
+    const cacheKey = `sob_str_${streamId}`;
+    if (SOBERANO_STREAMS_CACHE.has(cacheKey)) {
+        return SOBERANO_STREAMS_CACHE.get(cacheKey);
+    }
+
+    const tUrl = `https://torrentio.strem.fun/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`;
+    try {
+        const rawData = await fetchJson(tUrl, { 'User-Agent': 'Mozilla/5.0' }, 6500);
+        const streams = (rawData && Array.isArray(rawData.streams)) ? rawData.streams : [];
+        const parsed = streams.map(parseTorrentStream);
+
+        // Clasificar y ordenar por prioridad: Seeds descendentes + Calidad 1080p/4K
+        parsed.sort((a, b) => {
+            if (b.seeds !== a.seeds) return b.seeds - a.seeds;
+            const scoreQ = (q) => q === '4K' ? 3 : (q === '1080p' ? 2 : 1);
+            return scoreQ(b.quality) - scoreQ(a.quality);
+        });
+
+        const out = {
+            imdb_id: imdbId,
+            stream_id: streamId,
+            type: isTv ? 'tv' : 'movie',
+            season: s,
+            episode: e,
+            total_torrents: parsed.length,
+            streams: parsed
+        };
+
+        if (parsed.length > 0) {
+            SOBERANO_STREAMS_CACHE.set(cacheKey, out);
+        }
+        return out;
+    } catch (err) {
+        console.warn(`[SOBERANO_STREAMS] Error fetching streams for ${streamId}:`, err.message);
+        return {
+            imdb_id: imdbId,
+            stream_id: streamId,
+            type: isTv ? 'tv' : 'movie',
+            season: s,
+            episode: e,
+            total_torrents: 0,
+            streams: []
+        };
+    }
+}
+
+
+// ==============================================================================
 // 5. HTTP SERVER DISPATCHER
 // ==============================================================================
 
@@ -1821,6 +2034,66 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
         return res.end();
+    }
+
+    // 0. SOBERANO PHANTOM-SWARM TORRENT SEARCH & STREAM ENDPOINTS ($0.00 USD)
+    if (parsed.pathname === '/api/soberano/search') {
+        const q = parsed.query.q || parsed.query.query || '';
+        try {
+            const results = await searchSoberanoCatalog(q);
+            res.writeHead(200, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Cache-Control': 'public, max-age=1800',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(JSON.stringify({ status: 'ok', query: q, count: results.length, results: results }));
+        } catch(eSob) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({ status: 'error', message: eSob.message, results: [] }));
+        }
+    }
+
+    if (parsed.pathname === '/api/soberano/streams') {
+        const id = parsed.query.id || parsed.query.imdb_id || '';
+        const type = parsed.query.type || 'movie';
+        const s = parseInt(parsed.query.s || parsed.query.season || 1, 10) || 1;
+        const e = parseInt(parsed.query.e || parsed.query.episode || 1, 10) || 1;
+        try {
+            const streamsData = await getSoberanoTorrentStreams(id, type, s, e);
+            res.writeHead(200, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Cache-Control': 'public, max-age=900',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(JSON.stringify(streamsData));
+        } catch(eStreams) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({ status: 'error', message: eStreams.message, streams: [] }));
+        }
+    }
+
+    if (parsed.pathname === '/api/soberano/play') {
+        const id = parsed.query.id || parsed.query.imdb_id || '';
+        const type = parsed.query.type || 'movie';
+        const s = parseInt(parsed.query.s || parsed.query.season || 1, 10) || 1;
+        const e = parseInt(parsed.query.e || parsed.query.episode || 1, 10) || 1;
+        const title = parsed.query.title || '';
+        const isEs = parsed.query.is_es === '1' || parsed.query.is_es === 'true';
+        const origLang = isEs ? 'es' : 'en';
+
+        try {
+            // Transmutador Cuántico: enlaza la selección del torrent con el enjambre de streams HTTPS directos pre-buferizados en RAM
+            const playData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, title, title, false, reqProto);
+            res.writeHead(200, {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Cache-Control': 'no-store',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(JSON.stringify(playData));
+        } catch (ePlay) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({ status: 'error', message: ePlay.message }));
+        }
     }
 
     // Health & Silicon Telemetry
