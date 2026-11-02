@@ -1031,6 +1031,20 @@ async function resolveCuevanaStreams(id, type, s, e, titles, yearTarget, origLan
     return results;
 }
 
+function getStreamDeduplicationKey(url) {
+    if (!url) return '';
+    try {
+        var u = new URL(url);
+        var innerUrl = u.searchParams.get('url');
+        if (innerUrl) {
+            return innerUrl.split('?')[0];
+        }
+        return u.origin + u.pathname;
+    } catch(e) {
+        return url.split('?')[0];
+    }
+}
+
 function deduplicateAndRankStreams(candidates, origLang) {
     var isForeign = (origLang || 'en').toLowerCase() !== 'es';
     var seenUrls = new Set();
@@ -1039,14 +1053,14 @@ function deduplicateAndRankStreams(candidates, origLang) {
     for (var i = 0; i < candidates.length; i++) {
         var c = candidates[i];
         if (!c || !c.direct_stream_url) continue;
-        var normUrl = c.direct_stream_url.split('?')[0];
-        if (seenUrls.has(normUrl)) {
-            console.log('[DEDUP] Omitiendo stream duplicado: ' + normUrl);
+        var normKey = getStreamDeduplicationKey(c.direct_stream_url);
+        if (seenUrls.has(normKey)) {
+            console.log('[DEDUP] Omitiendo stream duplicado: ' + normKey);
             continue;
         }
-        seenUrls.add(normUrl);
+        seenUrls.add(normKey);
 
-        var score = 0;
+        var score = c.score || 0;
         if (c.is_sub) {
             score += 1000; // Preferencia universal solicitada: HD con subtítulos
         } else if (c.audio_es) {
@@ -1078,6 +1092,84 @@ function safeAll(promises) {
     }));
 }
 
+async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang = 'en', reqHost = '127.0.0.1:9099') {
+    const isTv = type === 'tv';
+    const url = isTv
+        ? `https://api.framextv.tech/api/stream?type=tv&id=${id}&s=${s}&e=${e}`
+        : `https://api.framextv.tech/api/stream?type=movie&id=${id}`;
+
+    try {
+        const text = await fetchText(url, {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
+            'Accept': 'application/json'
+        }, 5500);
+        const data = JSON.parse(text);
+        if (!data.success || !Array.isArray(data.sources) || data.sources.length === 0) {
+            return [];
+        }
+
+        let esSub = null;
+        const allSubs = [];
+        if (Array.isArray(data.subtitles)) {
+            data.subtitles.forEach(sub => {
+                if (!sub || !sub.url) return;
+                const langCode = ((sub.lang || '') + ' ' + (sub.language || '') + ' ' + (sub.label || '')).toLowerCase();
+                const isEs = /(?:^|[^a-z])(?:spa|spl|spn|es(?:-[a-z0-9]+)?|espa[ñn]ol|spanish|castellano|latino)(?:$|[^a-z])/i.test(langCode);
+                if (isEs) {
+                    const proxiedSub = `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`;
+                    allSubs.push({
+                        url: proxiedSub,
+                        raw_url: sub.url,
+                        label: sub.label || 'Español',
+                        lang: 'es'
+                    });
+                    if (!esSub) esSub = proxiedSub;
+                }
+            });
+        }
+
+        const candidates = [];
+        for (let i = 0; i < data.sources.length; i++) {
+            const src = data.sources[i];
+            if (!src || !src.url) continue;
+
+            const isHls = src.type === 'hls' || src.url.includes('.m3u8');
+            const is1080 = (src.quality || '').includes('1080') || src.quality === 'dcloud' || src.quality === 'tcloud';
+            const serverClean = (src.server || ('Servidor ' + (i + 1)))
+                .replace(/^Framex\s*/i, '')
+                .replace(/\s*-\s*S\d+E\d+\s*/i, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const serverName = `Framex ${serverClean} (${is1080 ? '1080p' : 'HD'})`;
+
+            let score = 1400;
+            if (is1080) score += 150;
+            if (isHls) score += 50;
+
+            candidates.push({
+                status: 'ok',
+                id: String(id),
+                type: type,
+                season: String(s),
+                episode: String(e),
+                direct_stream_url: src.url,
+                server: serverName,
+                is_sub: true,
+                quality: is1080 ? '1080p' : '720p',
+                format: isHls ? 'hls' : 'mp4',
+                audio_es: false,
+                sub_es: esSub,
+                subtitles: allSubs,
+                score: score - (i * 10)
+            });
+        }
+        return candidates;
+    } catch (e) {
+        console.warn(`[FRAMEX_RESOLVER] Error para ${id} (${type} S${s}E${e}): ${e.message}`);
+        return [];
+    }
+}
+
 async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '') {
     const cacheKey = `${id}_${type}_${s}_${e}`;
     const now = Date.now();
@@ -1103,19 +1195,20 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
     } catch(e) {}
     titles = Array.from(new Set(titles.filter(Boolean)));
 
-    console.log(`[DUAL_RESOLVER] Consultando Cuevana3c y Gnula para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
+    console.log(`[TRI_RESOLVER] Consultando Cuevana3c, Gnula y Framex para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
 
     try {
-        const dualResults = await safeAll([
+        const triResults = await safeAll([
             resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
-            resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang)
+            resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
+            resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost)
         ]);
 
-        const allCandidates = [].concat(dualResults[0] || [], dualResults[1] || []);
-        console.log(`[DUAL_RESOLVER] Total candidatos obtenidos de Cuevana + Gnula: ${allCandidates.length}`);
+        const allCandidates = [].concat(triResults[0] || [], triResults[1] || [], triResults[2] || []);
+        console.log(`[TRI_RESOLVER] Total candidatos obtenidos de Cuevana + Gnula + Framex: ${allCandidates.length}`);
 
         const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang);
-        console.log(`[DUAL_RESOLVER] Candidatos únicos y clasificados: ${ranked.length}`);
+        console.log(`[TRI_RESOLVER] Candidatos únicos y clasificados: ${ranked.length}`);
 
         if (ranked.length > 0) {
             const primary = ranked[0];
@@ -1126,19 +1219,19 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
                 is_sub: c.is_sub,
                 audio_es: c.audio_es
             }));
-            console.log(`[DUAL_RESOLVER SUCCESS] Stream ganador seleccionado (${primary.server}, score: ${primary.score}):`, primary.direct_stream_url.slice(0, 80) + '...');
+            console.log(`[TRI_RESOLVER SUCCESS] Stream ganador seleccionado (${primary.server}, score: ${primary.score}):`, primary.direct_stream_url.slice(0, 80) + '...');
             TMDB_STREAM_CACHE.set(cacheKey, { data: primary, ts: now });
             return decorateWithAligned(primary, id, type, s, e, reqHost);
         }
-    } catch (dualErr) {
-        console.warn(`[DUAL_RESOLVER] Error durante resolución: ${dualErr.message}`);
+    } catch (triErr) {
+        console.warn(`[TRI_RESOLVER] Error durante resolución: ${triErr.message}`);
     }
 
     return {
         status: 'not_found',
         id: id,
         type: type,
-        message: 'Contenido no disponible en Cuevana3c ni en Gnula por el momento.'
+        message: 'Contenido no disponible en los proveedores de streaming por el momento.'
     };
 }
 
@@ -1465,8 +1558,8 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/resolve_tmdb') {
         const id = parsed.query.id || '';
         const type = parsed.query.type || 'movie';
-        const s = parsed.query.s || 1;
-        const e = parsed.query.e || 1;
+        const s = parsed.query.s || parsed.query.season || 1;
+        const e = parsed.query.e || parsed.query.episode || 1;
 
         try {
             const origLang = parsed.query.orig_lang || 'en';

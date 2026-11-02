@@ -13500,7 +13500,7 @@
         function buildEmbedUrl(tmdbId, type, season, episode, server = 'framex', customSub = null) {
             const isTv = type === 'tv' || (season !== null && episode !== null);
             // CERO ANUNCIOS: Videasy y servidores ad-heavy completamente erradicados.
-            let url = isTv ? `https://framextv.tech/embed/${tmdbId}/${season}/${episode}?autoplay=1&ds_lang=es` : `https://framextv.tech/embed/${tmdbId}?autoplay=1&ds_lang=es`;
+            let url = isTv ? `https://framextv.cc/embed/${tmdbId}/${season}/${episode}?autoplay=1&ds_lang=es` : `https://framextv.cc/embed/${tmdbId}?autoplay=1&ds_lang=es`;
             if (customSub) {
                 url += `&sub_file=${encodeURIComponent(customSub)}&sub=es`;
             }
@@ -13645,6 +13645,18 @@
                         }
                         if (resData.status === 'ok' && resData.direct_stream_url) {
                             tmdbDirectStreamUrl = resData.direct_stream_url;
+                            if (resData.servers && resData.servers.length > 0) {
+                                directServersQueue = resData.servers;
+                            } else {
+                                directServersQueue = [{
+                                    name: resData.server || 'Stream Nativo HD',
+                                    url: resData.direct_stream_url,
+                                    quality: resData.quality || '1080p',
+                                    is_sub: resData.is_sub,
+                                    audio_es: resData.audio_es
+                                }];
+                            }
+                            currentServerIndex = 0;
                             if (resData.subtitles) {
                                 const seenClientUrls = new Set();
                                 availableSpanishSubs = resData.subtitles.filter(sub => {
@@ -13820,56 +13832,7 @@
 
                 if (tmdbAligning) startAlignmentPolling(item, type, s, e);
 
-                video.style.display = 'block';
-                video.automaticallyWaitsToMinimizeStalling = false;
-
-                // Detección de motor de reproducción:
-                // 1. En iOS / iPadOS / macOS Safari: Usar AVPlayer nativo (video.src) para HLS y MP4.
-                //    Esto es IMPRESCINDIBLE para que AirPlay 2 envíe video completo (no sólo audio MSE).
-                // 2. En webOS SmartTV u otros navegadores sin HLS nativo: Usar Hls.js con aceleración MSE.
-                const isNativeAppleHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
-
-                if (tmdbDirectStreamUrl.includes('.m3u8')) {
-                    if (isNativeAppleHls) {
-                        console.log('[SOBERANO PLAYER] Activando AVPlayer nativo para Apple WebKit / AirPlay:', tmdbDirectStreamUrl);
-                        if ('preferredForwardBufferDuration' in video) {
-                            video.preferredForwardBufferDuration = 4.0;
-                        }
-                        video.src = tmdbDirectStreamUrl;
-                        video.play().catch(e => console.log('Native HLS play wait:', e));
-                    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                        hlsPlayer = new Hls({
-                            maxBufferLength: 90,
-                            maxMaxBufferLength: 240,
-                            maxBufferSize: 60 * 1024 * 1024,
-                            enableWorker: false,
-                            progressive: true,
-                            renderTextTracksNatively: false
-                        });
-                        hlsPlayer.loadSource(tmdbDirectStreamUrl);
-                        hlsPlayer.attachMedia(video);
-                        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
-                            if (hlsPlayer) hlsPlayer.subtitleDisplay = false;
-                            enforceSpanishTracks(video);
-                            video.play().catch(e => console.log('HLS play wait:', e));
-                        });
-                        hlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
-                            if (hlsPlayer) {
-                                hlsPlayer.subtitleDisplay = false;
-                                hlsPlayer.subtitleTrack = -1;
-                            }
-                            enforceSpanishTracks(video);
-                        });
-                    } else {
-                        video.src = tmdbDirectStreamUrl;
-                        video.play().catch(e => console.log('Fallback direct play wait:', e));
-                    }
-                } else {
-                    video.src = tmdbDirectStreamUrl;
-                    video.play().catch(e => console.log('MP4 play wait:', e));
-                }
-
-                showToast('⚡ Reproducción Nativa (0 Anuncios • Apple TV)');
+                executeTmdbDirectPlayback(0, 0);
                 return;
             }
 
@@ -13880,25 +13843,175 @@
             triggerIframeFallback();
         }
 
+        function updateTmdbServerPills(activeIdx = 0) {
+            const pillsContainer = document.getElementById('playerServerPills');
+            if (!pillsContainer || !directServersQueue || directServersQueue.length === 0) return;
+
+            let html = '';
+            directServersQueue.forEach((srv, idx) => {
+                const isAct = idx === activeIdx ? 'active' : '';
+                const shortName = (srv.name || ('Servidor ' + (idx + 1)))
+                    .replace(/^Framex\s*/i, '')
+                    .replace(/^Cuevana3c\s*/i, '')
+                    .replace(/^Gnula\s*/i, '')
+                    .split('(')[0].trim() || ('Servidor ' + (idx + 1));
+                const qTag = (srv.quality || '').includes('1080') ? '1080p' : 'HD';
+                const audioTag = srv.audio_es ? '🇲🇽 ' : (srv.is_sub ? '🇺🇸 ' : '⚡ ');
+                html += `<button class="server-pill-btn ${isAct}" onclick="executeTmdbDirectPlayback(${idx}, video.currentTime || 0)">${audioTag}${shortName} (${qTag})</button>`;
+            });
+
+            html += `<button class="server-pill-btn sub-upload-pill" onclick="triggerSubUpload()" title="Cargar subtítulo externo (.srt / .vtt)"><i class="fa fa-file-arrow-up"></i> +Sub ES</button>`;
+            pillsContainer.innerHTML = html;
+        }
+
+        function executeTmdbDirectPlayback(serverIndex = 0, startTime = 0) {
+            clearTimeout(playbackWatchdog);
+            if (!currentTmdbPlaying || !directServersQueue || directServersQueue.length === 0) {
+                triggerIframeFallback();
+                return;
+            }
+
+            if (serverIndex >= directServersQueue.length) {
+                console.warn('[TMDB PLAYER] Todos los servidores directos agotados, activando fallback alternativo...');
+                triggerIframeFallback();
+                return;
+            }
+
+            currentServerIndex = serverIndex;
+            const currentSrv = directServersQueue[serverIndex];
+            tmdbDirectStreamUrl = currentSrv.url;
+            serverMode = 'native';
+
+            const cleanName = (currentSrv.name || 'Stream Nativo')
+                .replace(/^Framex\s*/i, '')
+                .replace(/^Cuevana3c\s*/i, '')
+                .replace(/^Gnula\s*/i, '')
+                .trim();
+            const srvTextEl = document.getElementById('serverModeText');
+            if (srvTextEl) srvTextEl.textContent = `${cleanName} (0 Anuncios)`;
+
+            if (fallbackIframe) {
+                fallbackIframe.style.display = 'none';
+                fallbackIframe.src = 'about:blank';
+            }
+
+            updateTmdbServerPills(serverIndex);
+
+            video.style.display = 'block';
+            video.automaticallyWaitsToMinimizeStalling = false;
+
+            if (hlsPlayer) {
+                hlsPlayer.destroy();
+                hlsPlayer = null;
+            }
+
+            const isNativeAppleHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
+            const isHls = tmdbDirectStreamUrl.includes('.m3u8');
+
+            const onLoadedMeta = () => {
+                video.removeEventListener('loadedmetadata', onLoadedMeta);
+                clearTimeout(playbackWatchdog);
+                if (startTime > 0) video.currentTime = startTime;
+                video.play().catch(e => console.log('TMDB play wait:', e));
+            };
+            video.addEventListener('loadedmetadata', onLoadedMeta);
+
+            video.onerror = (e) => {
+                console.warn(`[TMDB PLAYER] Error en servidor [${cleanName}], intentando siguiente...`, e);
+                video.removeEventListener('loadedmetadata', onLoadedMeta);
+                executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+            };
+
+            if (isHls) {
+                if (isNativeAppleHls) {
+                    console.log('[TMDB PLAYER] AVPlayer nativo Apple WebKit / AirPlay:', tmdbDirectStreamUrl);
+                    if ('preferredForwardBufferDuration' in video) {
+                        video.preferredForwardBufferDuration = 4.0;
+                    }
+                    video.src = tmdbDirectStreamUrl;
+                    video.play().catch(e => console.log('Native HLS play wait:', e));
+                } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    hlsPlayer = new Hls({
+                        maxBufferLength: 90,
+                        maxMaxBufferLength: 240,
+                        maxBufferSize: 60 * 1024 * 1024,
+                        enableWorker: false,
+                        progressive: true,
+                        renderTextTracksNatively: false
+                    });
+                    hlsPlayer.loadSource(tmdbDirectStreamUrl);
+                    hlsPlayer.attachMedia(video);
+                    hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+                        clearTimeout(playbackWatchdog);
+                        if (hlsPlayer) hlsPlayer.subtitleDisplay = false;
+                        enforceSpanishTracks(video);
+                        if (startTime > 0) video.currentTime = startTime;
+                        video.play().catch(e => console.log('HLS play wait:', e));
+                    });
+                    hlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+                        if (hlsPlayer) {
+                            hlsPlayer.subtitleDisplay = false;
+                            hlsPlayer.subtitleTrack = -1;
+                        }
+                        enforceSpanishTracks(video);
+                    });
+                    hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            console.warn(`[TMDB PLAYER] HLS Fatal en servidor [${cleanName}], pasando al siguiente...`, data);
+                            executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                        }
+                    });
+                } else {
+                    video.src = tmdbDirectStreamUrl;
+                    video.play().catch(e => console.log('Fallback direct play wait:', e));
+                }
+            } else {
+                video.src = tmdbDirectStreamUrl;
+                video.play().catch(e => console.log('MP4 play wait:', e));
+            }
+
+            playbackWatchdog = setTimeout(() => {
+                if (video.readyState === 0 && serverMode === 'native' && directServersQueue.length > (serverIndex + 1)) {
+                    console.warn(`[TMDB PLAYER] Watchdog 7.5s activado para [${cleanName}], pasando al siguiente servidor...`);
+                    executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                }
+            }, 7500);
+
+            showToast(`⚡ ${cleanName} (0 Anuncios • Apple TV)`);
+        }
+
         function switchPlayerServer(newServer) {
-            if (!currentTmdbPlaying) {
+            if (!currentTmdbPlaying || !directServersQueue || directServersQueue.length === 0) {
                 showToast('Control de reproducción activo');
                 return;
             }
-            if (tmdbDirectStreamUrl) {
-                video.play().catch(() => {});
-                showToast('⚡ Stream Nativo AVPlayer Activo (0 Anuncios)');
-            }
+            const nextIdx = (currentServerIndex + 1) % directServersQueue.length;
+            executeTmdbDirectPlayback(nextIdx, video.currentTime || 0);
         }
 
         function switchPlayerAudio(langCode) {
+            const isSpanish = langCode.includes('spa') || langCode.includes('latino') || langCode.includes('castellano');
+
+            // Si hay un servidor alternativo en la cola con el perfil de audio solicitado, conmutar directamente
+            if (directServersQueue && directServersQueue.length > 1) {
+                let targetIdx = -1;
+                if (isSpanish) {
+                    targetIdx = directServersQueue.findIndex(s => s.audio_es || (s.name || '').toLowerCase().includes('latino') || (s.name || '').toLowerCase().includes('castellano'));
+                } else {
+                    targetIdx = directServersQueue.findIndex(s => s.is_sub || (s.name || '').toLowerCase().includes('sub') || (s.name || '').toLowerCase().includes('framex'));
+                }
+                if (targetIdx !== -1 && targetIdx !== currentServerIndex) {
+                    executeTmdbDirectPlayback(targetIdx, video.currentTime || 0);
+                    return;
+                }
+            }
+
             document.querySelectorAll('.player-server-pills .server-pill-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             const activeBtn = document.querySelector(`.player-server-pills .server-pill-btn[onclick*="${langCode}"]`);
             if (activeBtn) activeBtn.classList.add('active');
 
-            const isSpanish = langCode.includes('spa') || langCode.includes('latino') || langCode.includes('castellano');
             const subOverlayEl = document.getElementById('soberanoSubOverlay');
             const btnSub = document.getElementById('btnSubToggle');
             const txtSub = document.getElementById('subStatusText');
