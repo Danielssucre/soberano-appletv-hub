@@ -359,6 +359,10 @@
             transform: scale(1.06);
         }
 
+        .header-mobile-tools {
+            display: none;
+        }
+
         /* ========================================================
            2. MAIN APP CONTAINER
            ======================================================== */
@@ -2398,122 +2402,56 @@
         }
 
         /* ========================================================
-           RESPONSIVE TUNING PARA IPHONE Y IPAD (Safe Area & Scale)
+           RESPONSIVE TUNING PARA IPAD & TABLETS (769px - 1024px)
            ======================================================== */
-        @media screen and (max-width: 959px) {
-            body {
-                padding-left: max(16px, var(--sal)) !important;
-                padding-right: max(16px, var(--sar)) !important;
-                padding-top: max(8px, var(--sat)) !important;
-                padding-bottom: max(32px, var(--sab)) !important;
-            }
-
+        @media screen and (min-width: 769px) and (max-width: 1024px) {
             header.appletv-header {
                 height: 64px !important;
-                padding: 0 max(16px, var(--sal)) !important;
+                padding: 0 24px !important;
                 top: 0;
             }
 
             .header-nav {
-                display: none !important; /* En iPhone oculta el menú horizontal saturado */
+                display: none !important;
+            }
+
+            .mobile-tab-bar {
+                display: flex !important;
+            }
+
+            main.appletv-main {
+                padding-top: calc(var(--safe-top) + 72px) !important;
+                padding-bottom: calc(75px + var(--sab)) !important;
+                padding-left: 20px !important;
+                padding-right: 20px !important;
             }
 
             .hero-banner {
-                height: 380px !important;
-                border-radius: 18px !important;
-                margin-top: 10px !important;
-            }
-
-            .hero-content {
-                padding: 22px 18px !important;
-            }
-
-            .hero-title {
-                font-size: 26px !important;
-                line-height: 1.2 !important;
-            }
-
-            .hero-synopsis {
-                font-size: 13px !important;
-                -webkit-line-clamp: 2 !important;
-                max-width: 100% !important;
+                height: 420px !important;
+                border-radius: 20px !important;
             }
 
             .tv-card {
-                flex: 0 0 250px !important;
+                flex: 0 0 260px !important;
                 border-radius: 14px !important;
             }
 
             .tv-poster-card {
-                flex: 0 0 150px !important;
+                flex: 0 0 160px !important;
                 border-radius: 12px !important;
             }
 
             .poster-wrap {
-                height: 220px !important;
-            }
-
-            .card-title, .poster-title {
-                font-size: 14px !important;
+                aspect-ratio: 2 / 3 !important;
             }
 
             .catalog-grid {
-                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
-                gap: 12px !important;
-            }
-
-            /* Sheet modal ajustado para iPhone (Bottom Sheet nativo iOS) */
-            .details-sheet {
-                border-radius: 24px 24px 0 0 !important;
-                max-height: 90vh !important;
-                padding: 20px 16px env(safe-area-inset-bottom, 20px) 16px !important;
-            }
-
-            .details-hero {
-                flex-direction: row !important;
+                grid-template-columns: repeat(3, 1fr) !important;
                 gap: 14px !important;
-                text-align: left !important;
             }
 
-            .details-poster {
-                width: 95px !important;
-                height: 140px !important;
-                flex-shrink: 0 !important;
-            }
-
-            .details-title {
-                font-size: 20px !important;
-            }
-
-            .details-synopsis {
-                font-size: 13px !important;
-                max-height: 80px !important;
-                overflow-y: auto !important;
-            }
-
-            /* Player OSD adaptado a pantalla táctil de iPhone */
-            .player-osd {
-                padding: max(16px, var(--sat)) max(16px, var(--sar)) max(20px, var(--sab)) max(16px, var(--sal)) !important;
-            }
-
-            .player-title-box h2 {
-                font-size: 18px !important;
-            }
-
-            .player-title-box h3 {
-                font-size: 13px !important;
-            }
-
-            .btn-ctrl {
-                width: 44px !important;
-                height: 44px !important;
-                font-size: 18px !important;
-            }
-
-            .btn-ctrl#btnPlayPause {
-                width: 54px !important;
-                height: 54px !important;
-                font-size: 24px !important;
+            .shelf-arrow {
+                display: none !important;
             }
         }
 
@@ -2613,29 +2551,38 @@
         }
 
         /* ========================================================
-           SOBERANO CLOUDFLARE MOBILE OPTIMIZATIONS (iOS / ANDROID)
+           APPLE HIG MOBILE ENGINE (IPHONE SE/13/14/15/16 • 375pt-430pt)
+           Cero Apiñamiento • Cero Superposición • Touch Targets 44x44pt
            ======================================================== */
-        @media screen and (max-width: 768px), (pointer: coarse) and (max-width: 900px) {
+        @media screen and (max-width: 768px) {
             body {
-                -webkit-tap-highlight-color: transparent;
-                overscroll-behavior-y: none;
+                -webkit-tap-highlight-color: transparent !important;
+                overscroll-behavior-y: none !important;
                 overflow-x: hidden !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                margin: 0 !important;
             }
 
-            /* Top header compact on mobile: Fixed, un-overlapping, pristine safe area */
+            /* 1. Header Fijo Traslúcido con Safe Area Pristina */
             header.appletv-header {
                 position: fixed !important;
                 top: 0 !important;
                 left: 0 !important;
                 right: 0 !important;
-                padding: calc(6px + env(safe-area-inset-top, 10px)) 16px 8px 16px !important;
-                height: auto !important;
-                min-height: 52px !important;
-                background: rgba(7, 8, 11, 0.92) !important;
-                backdrop-filter: blur(25px) !important;
-                -webkit-backdrop-filter: blur(25px) !important;
+                width: 100% !important;
+                height: calc(48px + var(--sat)) !important;
+                min-height: calc(48px + var(--sat)) !important;
+                padding: var(--sat) 16px 0 16px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                background: rgba(7, 8, 11, 0.88) !important;
+                backdrop-filter: blur(25px) saturate(180%) !important;
+                -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
                 z-index: 1000 !important;
+                box-sizing: border-box !important;
             }
 
             header.appletv-header .header-brand .brand-pill {
@@ -2646,22 +2593,57 @@
                 display: none !important;
             }
 
-            /* Bottom Tab Bar visible and thumb-friendly */
+            .header-mobile-tools {
+                display: flex !important;
+                align-items: center !important;
+                gap: 8px !important;
+            }
+
+            .header-mobile-tools .btn-icon-tool {
+                width: 36px !important;
+                height: 36px !important;
+                min-width: 36px !important;
+                border-radius: 50% !important;
+                background: rgba(255, 255, 255, 0.08) !important;
+                border: 1px solid rgba(255, 255, 255, 0.14) !important;
+                color: #ffffff !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                font-size: 13.5px !important;
+            }
+
+            /* 2. Barra de Navegación Inferior (iOS Native Tab Bar 44pt+ tap target) */
             .mobile-tab-bar {
                 display: flex !important;
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                width: 100% !important;
+                height: calc(50px + var(--sab)) !important;
+                padding-bottom: var(--sab) !important;
                 background: rgba(10, 14, 22, 0.94) !important;
                 backdrop-filter: blur(25px) saturate(180%) !important;
                 -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
                 border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
-                height: calc(58px + env(safe-area-inset-bottom, 16px)) !important;
-                padding-bottom: env(safe-area-inset-bottom, 16px) !important;
                 z-index: 9999 !important;
+                box-sizing: border-box !important;
             }
 
             .mobile-tab-item {
+                flex: 1 !important;
+                min-height: 48px !important;
                 color: rgba(255, 255, 255, 0.6) !important;
-                font-size: 11px !important;
+                font-size: 10.5px !important;
                 font-weight: 600 !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 3px !important;
+                background: transparent !important;
+                border: none !important;
             }
 
             .mobile-tab-item.active {
@@ -2669,110 +2651,258 @@
             }
 
             .mobile-tab-item i {
-                font-size: 20px !important;
+                font-size: 19px !important;
             }
 
-            /* Main container padding: guarantees header and bottom tab bar never overlap content */
+            /* 3. Contenedor Principal: Cero doble margen, respiración vertical justa */
             main.appletv-main {
-                padding-top: calc(62px + env(safe-area-inset-top, 12px)) !important;
-                padding-bottom: calc(85px + env(safe-area-inset-bottom, 20px)) !important;
-                gap: 22px !important;
+                padding-top: calc(56px + var(--sat)) !important;
+                padding-bottom: calc(72px + var(--sab)) !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                margin: 0 !important;
+                gap: 20px !important;
                 overflow-x: hidden !important;
-            }
-
-            /* Quality Filter Bar compact for mobile thumb */
-            .quality-filter-bar {
-                margin: 6px 14px 14px 14px !important;
-                padding: 12px 14px !important;
-                border-radius: 14px !important;
-                flex-direction: column !important;
-                align-items: stretch !important;
-                gap: 10px !important;
-            }
-
-            .quality-filter-left {
                 width: 100% !important;
+                box-sizing: border-box !important;
+            }
+
+            /* 4. Hero Feature Spotlight (Apple TV / Netflix Mobile) */
+            .hero-container {
+                padding: 0 16px !important;
+                margin: 0 0 6px 0 !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+
+            .hero-banner {
+                position: relative !important;
+                width: 100% !important;
+                height: 380px !important;
+                border-radius: 18px !important;
+                overflow: hidden !important;
+                display: flex !important;
+                align-items: flex-end !important;
+                padding: 18px 16px !important;
+                box-sizing: border-box !important;
+                box-shadow: 0 14px 36px rgba(0, 0, 0, 0.75) !important;
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                background: #0d121c !important;
+            }
+
+            .hero-backdrop {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                object-fit: cover !important;
+                object-position: top center !important;
+            }
+
+            .hero-gradient-overlay {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                background: linear-gradient(180deg, rgba(7, 8, 11, 0.15) 0%, rgba(7, 8, 11, 0.65) 58%, #07080b 100%) !important;
+                z-index: 2 !important;
+            }
+
+            .hero-content {
+                position: relative !important;
+                z-index: 3 !important;
+                width: 100% !important;
+                max-width: 100% !important;
                 display: flex !important;
                 flex-direction: column !important;
-                align-items: stretch !important;
-                gap: 8px !important;
-            }
-
-            .quality-filter-title {
-                font-size: 12px !important;
-                color: rgba(255, 255, 255, 0.7) !important;
-                margin-bottom: 2px !important;
-            }
-
-            .quality-filter-left .filter-pill {
-                width: 100% !important;
-                text-align: center !important;
-                padding: 10px 14px !important;
-                font-size: 13px !important;
-                border-radius: 12px !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
                 gap: 6px !important;
             }
 
-            .quality-status-tag {
+            .hero-tagline {
                 font-size: 11px !important;
-                padding: 6px 10px !important;
-                width: 100% !important;
-                justify-content: center !important;
-                text-align: center !important;
+                font-weight: 700 !important;
+                letter-spacing: 0.8px !important;
+                color: #38bdf8 !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                gap: 6px !important;
             }
 
-            /* Shelves and Poster Cards touch scroll: Clean spacing, no negative bleed */
-            .shelf-section {
-                margin-bottom: 18px !important;
-                padding: 0 14px !important;
+            .hero-title {
+                font-size: 22px !important;
+                line-height: 1.15 !important;
+                font-weight: 800 !important;
+                text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9) !important;
+                margin: 0 !important;
+            }
+
+            .hero-meta-row {
+                font-size: 11px !important;
+                gap: 6px !important;
+                color: rgba(255, 255, 255, 0.7) !important;
+                display: flex !important;
+                align-items: center !important;
+                flex-wrap: wrap !important;
+            }
+
+            .hero-meta-row .meta-badge {
+                font-size: 10px !important;
+                padding: 2px 6px !important;
+                border-radius: 4px !important;
+            }
+
+            .hero-synopsis {
+                font-size: 12px !important;
+                line-height: 1.4 !important;
+                color: rgba(255, 255, 255, 0.75) !important;
+                display: -webkit-box !important;
+                -webkit-line-clamp: 2 !important;
+                -webkit-box-orient: vertical !important;
                 overflow: hidden !important;
+                margin: 0 !important;
+            }
+
+            .hero-actions {
+                display: flex !important;
+                align-items: center !important;
+                gap: 10px !important;
+                margin-top: 4px !important;
+            }
+
+            .hero-actions .hero-btn {
+                min-height: 42px !important;
+                padding: 0 16px !important;
+                font-size: 13px !important;
+                font-weight: 700 !important;
+                border-radius: 12px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 8px !important;
+                flex: 1 !important;
+            }
+
+            .hero-switcher-dots {
+                bottom: 10px !important;
+                right: 14px !important;
+                gap: 6px !important;
+            }
+
+            .switcher-dot {
+                width: 6px !important;
+                height: 6px !important;
+            }
+
+            .switcher-dot.active {
+                width: 18px !important;
+                border-radius: 3px !important;
+            }
+
+            /* 5. Carruseles Horizontales: Full Bleed 0 a 100vw, Peek Natural */
+            .shelf-section {
+                margin-bottom: 20px !important;
+                padding: 0 !important;
+                overflow: visible !important;
+                width: 100% !important;
             }
 
             .shelf-header {
-                padding: 0 !important;
+                padding: 0 16px !important;
                 margin-bottom: 8px !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
             }
 
             .shelf-title {
-                font-size: 16px !important;
+                font-size: 17px !important;
+                font-weight: 700 !important;
+                letter-spacing: -0.3px !important;
+                display: flex !important;
+                align-items: center !important;
+                gap: 8px !important;
             }
 
             .shelf-subtitle {
-                font-size: 11px !important;
+                font-size: 11.5px !important;
+                color: rgba(255, 255, 255, 0.45) !important;
             }
 
             .shelf-track-container {
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 100% !important;
-                overflow: hidden !important;
+                overflow: visible !important;
             }
 
             .shelf-track {
-                gap: 10px !important;
-                padding: 4px 0 12px 0 !important;
-                scroll-padding: 0 !important;
+                display: flex !important;
+                gap: 12px !important;
+                padding: 4px 16px 14px 16px !important;
+                overflow-x: auto !important;
+                overflow-y: hidden !important;
+                -webkit-overflow-scrolling: touch !important;
+                scroll-snap-type: x mandatory !important;
+                scroll-padding: 0 16px !important;
+                scrollbar-width: none !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+
+            .shelf-track::-webkit-scrollbar {
+                display: none !important;
             }
 
             .shelf-arrow {
                 display: none !important;
             }
 
-            /* Continuar Viendo Card on iPhone (compact landscape) */
+            /* 6. Continuar Viendo Card (16:9 Landscape - 220px con 65% peek) */
             .tv-card {
-                flex: 0 0 200px !important;
+                flex: 0 0 220px !important;
+                width: 220px !important;
                 border-radius: 12px !important;
+                scroll-snap-align: start !important;
+                background: rgba(255, 255, 255, 0.05) !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                overflow: hidden !important;
+            }
+
+            .card-thumbnail-wrap {
+                width: 100% !important;
+                aspect-ratio: 16 / 9 !important;
+                position: relative !important;
+                background: #141822 !important;
+                overflow: hidden !important;
+            }
+
+            .card-thumbnail-wrap .card-img {
+                width: 100% !important;
+                height: 100% !important;
+                object-fit: cover !important;
+            }
+
+            .card-pill-tag {
+                top: 6px !important;
+                right: 6px !important;
+                padding: 2px 6px !important;
+                font-size: 9.5px !important;
+                border-radius: 4px !important;
             }
 
             .card-info {
                 padding: 8px 10px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 2px !important;
             }
 
             .card-title {
-                font-size: 12.5px !important;
+                font-size: 13px !important;
+                font-weight: 700 !important;
+                line-height: 1.25 !important;
                 white-space: nowrap !important;
                 overflow: hidden !important;
                 text-overflow: ellipsis !important;
@@ -2780,29 +2910,68 @@
 
             .card-meta {
                 font-size: 11px !important;
+                color: rgba(255, 255, 255, 0.55) !important;
                 white-space: nowrap !important;
                 overflow: hidden !important;
                 text-overflow: ellipsis !important;
             }
 
-            /* Movies & Series Posters on iPhone (compact 2:3) */
+            /* 7. Poster Cards (2:3 Vertical - 130px con 70% peek) */
             .tv-poster-card {
-                flex: 0 0 125px !important;
-                width: 125px !important;
-                border-radius: 10px !important;
+                flex: 0 0 130px !important;
+                width: 130px !important;
+                border-radius: 12px !important;
+                scroll-snap-align: start !important;
+                background: rgba(255, 255, 255, 0.05) !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                overflow: hidden !important;
             }
 
             .poster-wrap {
-                height: 180px !important;
-                border-radius: 10px 10px 0 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                aspect-ratio: 2 / 3 !important;
+                position: relative !important;
+                overflow: hidden !important;
+                border-radius: 12px 12px 0 0 !important;
+            }
+
+            .poster-wrap .poster-img {
+                width: 100% !important;
+                height: 100% !important;
+                object-fit: cover !important;
+            }
+
+            /* CERO SUPERPOSICIÓN: Ocultar badge de tipo redundante en posters móviles */
+            .tv-poster-card .card-pill-tag {
+                display: none !important;
+            }
+
+            .quality-badge {
+                top: 6px !important;
+                left: 6px !important;
+                padding: 2px 6px !important;
+                font-size: 9px !important;
+                border-radius: 4px !important;
+                letter-spacing: 0.2px !important;
+            }
+
+            .rank-number-overlay {
+                font-size: 36px !important;
+                bottom: 2px !important;
+                left: 4px !important;
             }
 
             .poster-info {
-                padding: 8px 10px !important;
+                padding: 8px 8px !important;
+                display: flex !important;
+                flex-direction: column !important;
+                gap: 2px !important;
             }
 
             .poster-title {
                 font-size: 12px !important;
+                font-weight: 700 !important;
                 white-space: nowrap !important;
                 overflow: hidden !important;
                 text-overflow: ellipsis !important;
@@ -2810,36 +2979,60 @@
 
             .poster-sub {
                 font-size: 10.5px !important;
+                color: rgba(255, 255, 255, 0.5) !important;
                 white-space: nowrap !important;
                 overflow: hidden !important;
                 text-overflow: ellipsis !important;
             }
 
-            /* Genres Horizontal Track on iPhone */
+            /* 8. Pista de Géneros Horizontal */
             .genres-scroll-container {
-                padding: 2px 0 6px 0 !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            .genres-track {
+                display: flex !important;
+                gap: 8px !important;
+                padding: 2px 16px 12px 16px !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+                scroll-padding: 0 16px !important;
             }
 
             .genre-chip {
-                font-size: 11.5px !important;
-                padding: 6px 12px !important;
-                border-radius: 14px !important;
+                min-height: 36px !important;
+                padding: 0 14px !important;
+                font-size: 12px !important;
+                border-radius: 18px !important;
+                white-space: nowrap !important;
+                flex-shrink: 0 !important;
             }
 
-            /* Catalog Header & Grid on iPhone */
+            /* 9. Catálogo Dinámico: 2 Columnas Limpias, CERO Colisión de Badges */
             .explore-catalog-section {
-                padding: 18px 14px 40px 14px !important;
-                margin-top: 10px !important;
+                padding: 16px 16px 40px 16px !important;
+                margin-top: 8px !important;
+                border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
             }
 
             .explore-catalog-header {
+                display: flex !important;
                 flex-direction: column !important;
-                align-items: stretch !important;
                 gap: 12px !important;
+                margin-bottom: 14px !important;
             }
 
             .explore-header-left {
+                display: flex !important;
+                align-items: baseline !important;
+                justify-content: space-between !important;
                 width: 100% !important;
+            }
+
+            .catalog-badge-total {
+                font-size: 11px !important;
+                padding: 2px 8px !important;
             }
 
             .catalog-page-arrows {
@@ -2852,34 +3045,83 @@
 
             .btn-page-nav {
                 flex: 1 !important;
-                padding: 8px 10px !important;
-                font-size: 12px !important;
-                text-align: center !important;
+                min-height: 42px !important;
+                padding: 0 12px !important;
+                font-size: 12.5px !important;
+                border-radius: 12px !important;
                 justify-content: center !important;
             }
 
             .page-indicator-pill {
-                font-size: 12px !important;
-                padding: 0 6px !important;
-                flex-shrink: 0 !important;
+                font-size: 13px !important;
+                padding: 0 8px !important;
             }
 
             .catalog-grid {
+                display: grid !important;
                 grid-template-columns: repeat(2, 1fr) !important;
-                gap: 10px !important;
+                gap: 12px !important;
                 padding: 0 !important;
+            }
+
+            .catalog-card {
+                border-radius: 12px !important;
+                overflow: hidden !important;
+                background: rgba(255, 255, 255, 0.04) !important;
+                border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            }
+
+            .catalog-poster-wrap {
+                padding-top: 0 !important;
+                aspect-ratio: 2 / 3 !important;
+                width: 100% !important;
+                position: relative !important;
+                overflow: hidden !important;
+            }
+
+            .catalog-poster-img {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                object-fit: cover !important;
+            }
+
+            .catalog-type-pill {
+                top: 6px !important;
+                left: 6px !important;
+                padding: 2px 6px !important;
+                font-size: 9px !important;
+                border-radius: 4px !important;
+            }
+
+            /* CERO SUPERPOSICIÓN: El status se ubica abajo a la derecha del poster sin chocar con type */
+            .catalog-status-dot {
+                top: auto !important;
+                bottom: 6px !important;
+                right: 6px !important;
+                padding: 2px 6px !important;
+                font-size: 9px !important;
+                border-radius: 4px !important;
+                backdrop-filter: blur(8px) !important;
+                -webkit-backdrop-filter: blur(8px) !important;
             }
 
             .catalog-card-info {
                 padding: 8px 10px !important;
+                gap: 2px !important;
             }
 
             .catalog-card-title {
-                font-size: 12px !important;
+                font-size: 12.5px !important;
+                font-weight: 700 !important;
+                line-height: 1.25 !important;
+                -webkit-line-clamp: 2 !important;
             }
 
             .catalog-card-sub {
-                font-size: 10.5px !important;
+                font-size: 11px !important;
             }
 
             /* Details Sheet as iOS Bottom Sheet with zero overlap */
@@ -3239,6 +3481,10 @@
             <button class="nav-item" id="tabSeries" onclick="switchMediaTab('series')"><i class="fa fa-tv"></i> Series</button>
             <button class="nav-item" id="tabSearch" onclick="openSearchModal()"><i class="fa fa-search"></i> Buscar</button>
         </nav>
+
+        <div class="header-mobile-tools">
+            <button class="btn-icon-tool" onclick="openSearchModal()" title="Buscar"><i class="fa fa-search"></i></button>
+        </div>
     </header>
 
     <!-- 2. MAIN APPLICATION CONTENT -->
@@ -3259,6 +3505,29 @@
              VISTA 1: ANIME (5,057 SERIES + GÉNEROS)
              ========================================== -->
         <div id="viewAnime">
+            <!-- 0. HERO SPOTLIGHT SHOWCASE (APPLE HIG BANNER) -->
+            <section class="hero-container" id="heroShowcaseSection">
+                <div class="hero-banner">
+                    <img id="heroBackdropA" class="hero-backdrop top-shelf-layer active" src="" alt="Hero Backdrop A">
+                    <img id="heroBackdropB" class="hero-backdrop top-shelf-layer" src="" alt="Hero Backdrop B">
+                    <div class="hero-gradient-overlay"></div>
+                    <div class="hero-content">
+                        <div class="hero-tagline" id="heroTag"><span class="dot"></span> Colección Soberano • 4K HDR</div>
+                        <h1 class="hero-title" id="heroTitle">Soberano TV</h1>
+                        <div class="hero-meta-row">
+                            <span class="meta-badge" id="heroStudio">Top Anime</span>
+                            <span class="meta-badge" id="heroYear">2026</span>
+                            <span id="heroGenres">Acción, Aventura</span>
+                        </div>
+                        <p class="hero-synopsis" id="heroSynopsis">Cargando catálogo maestro...</p>
+                        <div class="hero-actions">
+                            <button class="btn-apple-primary hero-btn-play" onclick="playHeroFeatured()"><i class="fa fa-play"></i> Reproducir</button>
+                            <button class="btn-apple-secondary hero-btn-details" onclick="openHeroDetails()"><i class="fa fa-circle-info"></i> Detalles</button>
+                        </div>
+                    </div>
+                    <div class="hero-switcher-dots" id="heroDots"></div>
+                </div>
+            </section>
             <!-- 2. EXPLORAR POR GÉNERO (REEMPLAZO MINIMALISTA DE BÓVEDA) -->
             <section class="shelf-section" id="sectionGenres">
                 <div class="shelf-header">
