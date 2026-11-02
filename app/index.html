@@ -3407,8 +3407,8 @@
     <div class="player-modal-backdrop" id="playerModal">
         <div class="player-viewport-container" id="playerBox" onmousemove="handlePlayerUserActivity()" ontouchstart="handlePlayerUserActivity()">
             
-            <!-- AVPlayer Nativo para iPadOS / Safari -->
-            <video id="nativeVideo" playsinline webkit-playsinline x-webkit-airplay="allow"></video>
+            <!-- AVPlayer Nativo para iPadOS / Safari / AirPlay 2 -->
+            <video id="nativeVideo" playsinline webkit-playsinline x-webkit-airplay="allow" airplay="allow" crossorigin="anonymous"></video>
 
             <!-- Fallback Fail-Safe Iframe (Cero Fallos Garantizado) -->
             <!-- IFRAME EXTIRPADO DEFINITIVAMENTE: 0 Anuncios, 100% AVPlayer Nativo -->
@@ -9956,6 +9956,22 @@
             const btn = document.getElementById('btnAirPlay');
             if (!vid || !btn) return;
 
+            // Asegurar atributos de AirPlay en WebKit
+            vid.setAttribute('x-webkit-airplay', 'allow');
+            vid.setAttribute('airplay', 'allow');
+
+            // Monitorear cuando AirPlay se conecta o desconecta a un receptor inalámbrico
+            vid.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+                const isWireless = !!vid.webkitCurrentPlaybackTargetIsWireless;
+                console.log('[AIRPLAY] Estado receptor inalámbrico cambiado:', isWireless);
+                if (isWireless) {
+                    showToast('📺 Transmitiendo en pantalla con AirPlay');
+                    btn.classList.add('airplay-active');
+                } else {
+                    btn.classList.remove('airplay-active');
+                }
+            });
+
             if (window.WebKitPlaybackTargetAvailabilityEvent) {
                 vid.addEventListener('webkitplaybacktargetavailabilitychanged', (event) => {
                     if (event.availability === 'available') {
@@ -13225,29 +13241,47 @@
                 video.style.display = 'block';
                 video.automaticallyWaitsToMinimizeStalling = false;
 
+                // Detección de motor de reproducción:
+                // 1. En iOS / iPadOS / macOS Safari: Usar AVPlayer nativo (video.src) para HLS y MP4.
+                //    Esto es IMPRESCINDIBLE para que AirPlay 2 envíe video completo (no sólo audio MSE).
+                // 2. En webOS SmartTV u otros navegadores sin HLS nativo: Usar Hls.js con aceleración MSE.
+                const isNativeAppleHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
+
                 if (tmdbDirectStreamUrl.includes('.m3u8')) {
-                    hlsPlayer = new Hls({
-                        maxBufferLength: 90,
-                        maxMaxBufferLength: 240,
-                        maxBufferSize: 60 * 1024 * 1024,
-                        enableWorker: false,
-                        progressive: true,
-                        renderTextTracksNatively: false
-                    });
-                    hlsPlayer.loadSource(tmdbDirectStreamUrl);
-                    hlsPlayer.attachMedia(video);
-                    hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
-                        if (hlsPlayer) hlsPlayer.subtitleDisplay = false;
-                        enforceSpanishTracks(video);
-                        video.play().catch(e => console.log('HLS play wait:', e));
-                    });
-                    hlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
-                        if (hlsPlayer) {
-                            hlsPlayer.subtitleDisplay = false;
-                            hlsPlayer.subtitleTrack = -1;
+                    if (isNativeAppleHls) {
+                        console.log('[SOBERANO PLAYER] Activando AVPlayer nativo para Apple WebKit / AirPlay:', tmdbDirectStreamUrl);
+                        if ('preferredForwardBufferDuration' in video) {
+                            video.preferredForwardBufferDuration = 4.0;
                         }
-                        enforceSpanishTracks(video);
-                    });
+                        video.src = tmdbDirectStreamUrl;
+                        video.play().catch(e => console.log('Native HLS play wait:', e));
+                    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                        hlsPlayer = new Hls({
+                            maxBufferLength: 90,
+                            maxMaxBufferLength: 240,
+                            maxBufferSize: 60 * 1024 * 1024,
+                            enableWorker: false,
+                            progressive: true,
+                            renderTextTracksNatively: false
+                        });
+                        hlsPlayer.loadSource(tmdbDirectStreamUrl);
+                        hlsPlayer.attachMedia(video);
+                        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+                            if (hlsPlayer) hlsPlayer.subtitleDisplay = false;
+                            enforceSpanishTracks(video);
+                            video.play().catch(e => console.log('HLS play wait:', e));
+                        });
+                        hlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+                            if (hlsPlayer) {
+                                hlsPlayer.subtitleDisplay = false;
+                                hlsPlayer.subtitleTrack = -1;
+                            }
+                            enforceSpanishTracks(video);
+                        });
+                    } else {
+                        video.src = tmdbDirectStreamUrl;
+                        video.play().catch(e => console.log('Fallback direct play wait:', e));
+                    }
                 } else {
                     video.src = tmdbDirectStreamUrl;
                     video.play().catch(e => console.log('MP4 play wait:', e));
