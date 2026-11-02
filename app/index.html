@@ -11456,9 +11456,14 @@
                 tr.srclang = 'es';
                 tr.label = 'Español';
                 tr.src = currentSubBlobUrl;
+                // Prevenir que el navegador active el track automáticamente al adjuntarlo
                 video.appendChild(tr);
-                // En modo inline renderiza soberanoSubOverlay; solo en fullscreen nativo iOS se activa el track nativo
-                enforceSpanishTracks(video);
+                // Desactivar síncronamente y asíncronamente para evitar que WebKit renderice subtítulos dobles
+                if (tr.track) tr.track.mode = 'disabled';
+                setTimeout(() => {
+                    if (tr.track) tr.track.mode = 'disabled';
+                    enforceSpanishTracks(video);
+                }, 0);
             } catch(e) {}
         }
 
@@ -14477,18 +14482,21 @@
 
         function enforceSpanishTracks(videoEl) {
             // SOBERANO ANTI-DUPLICATION SHIELD:
-            // En pantalla inline todos los subtítulos se pintan en la capa DOM 'soberanoSubOverlay'.
-            // Solo si iOS Safari está en pantalla completa nativa (webkitDisplayingFullscreen) y el usuario activó subtítulos, habilitar nuestro track ES.
+            // En pantalla inline todos los subtítulos se pintan ÚNICAMENTE en la capa DOM 'soberanoSubOverlay'.
+            // Jamás permitir que el navegador (WebKit/Blink/Hls.js) pinte subtítulos nativos en modo inline.
+            // Solo en pantalla completa nativa de iOS (webkitDisplayingFullscreen) se activa el track nativo.
             if (hlsPlayer) {
                 hlsPlayer.subtitleDisplay = false;
                 if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
             }
             if (!videoEl || !videoEl.textTracks) return;
-            const isIosFullscreen = !!videoEl.webkitDisplayingFullscreen;
+            const isIosFullscreen = !!(videoEl.webkitDisplayingFullscreen || document.fullscreenElement === videoEl);
+            const overlayEl = document.getElementById('soberanoSubOverlay');
             for (let i = 0; i < videoEl.textTracks.length; i++) {
                 const tr = videoEl.textTracks[i];
-                if (isIosFullscreen && subtitlesEnabled && (tr.language === 'es' || tr.label === 'Español')) {
+                if (isIosFullscreen && subtitlesEnabled && (tr.language === 'es' || tr.label === 'Español' || tr.id === 'soberanoNativeEsTrack')) {
                     tr.mode = 'showing';
+                    if (overlayEl) overlayEl.style.display = 'none';
                 } else {
                     tr.mode = 'disabled';
                 }
