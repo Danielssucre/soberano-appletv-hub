@@ -3062,6 +3062,18 @@
                 color: #38bdf8 !important;
             }
 
+            .btn-ctrl.btn-fullscreen-ios {
+                width: 38px !important;
+                min-width: 38px !important;
+                height: 38px !important;
+                padding: 0 !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                background: rgba(255, 255, 255, 0.14) !important;
+                font-size: 13px !important;
+            }
+
             .btn-ctrl#btnSubToggle {
                 width: auto !important;
                 min-width: 40px !important;
@@ -3482,6 +3494,11 @@
                                     <path d="M6 17h12l-6-6zM4 19h16v2H4z"/>
                                 </svg>
                                 <span class="btn-text" style="margin-left:4px;">AirPlay</span>
+                            </button>
+
+                            <!-- Pantalla Completa Nativa iOS (Activa Reproductor Nativo de Apple) -->
+                            <button class="btn-ctrl btn-fullscreen-ios" id="btnFullscreenIos" onclick="toggleNativeFullscreen()" title="Pantalla Completa Nativa">
+                                <i class="fa fa-expand"></i>
                             </button>
 
                             <!-- Subtítulos Español CC -->
@@ -11405,6 +11422,25 @@
             const m = Math.floor(s / 60);
             const remS = s % 60;
             return `${m}:${String(remS).padStart(2, '0')}`;
+        }
+
+        // Pantalla Completa Nativa iOS (Activa reproductor AVPlayer nativo con controles AirPlay del sistema)
+        function toggleNativeFullscreen() {
+            if (!video) return;
+            try {
+                if (video.webkitEnterFullscreen) {
+                    video.webkitEnterFullscreen();
+                } else if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                } else {
+                    triggerAirPlay();
+                }
+            } catch(e) {
+                console.warn('Error activando pantalla completa nativa:', e);
+                triggerAirPlay();
+            }
         }
 
         // Picture-in-Picture nativo iPadOS
