@@ -1026,6 +1026,17 @@
             justify-content: space-between;
         }
 
+        .player-header-top-row {
+            display: contents;
+        }
+
+        .player-sync-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            margin-top: 4px;
+        }
+
         .player-titles {
             display: flex;
             flex-direction: column;
@@ -2881,40 +2892,222 @@
                 padding: calc(16px + env(safe-area-inset-top, 20px)) 16px calc(80px + env(safe-area-inset-bottom, 20px)) 16px !important;
             }
 
-            /* Player Controls on Mobile */
-            .player-bottom-controls {
-                padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 16px)) 14px !important;
-            }
-
-            .controls-toolbar {
-                flex-wrap: wrap !important;
+            /* ========================================================
+               MOBILE PLAYER OSD: CLEAN, UN-CRAMPED 100% BREATHING ROOM
+               ======================================================== */
+            .player-header-osd {
+                flex-direction: column !important;
+                align-items: stretch !important;
                 gap: 8px !important;
+                padding: calc(12px + env(safe-area-inset-top, 10px)) 16px 8px 16px !important;
+                background: linear-gradient(180deg, rgba(7, 10, 16, 0.95) 0%, rgba(7, 10, 16, 0.6) 80%, transparent 100%) !important;
             }
 
-            .right-controls {
-                flex-wrap: wrap !important;
+            .player-header-top-row {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                width: 100% !important;
+            }
+
+            .player-titles {
+                max-width: calc(100% - 46px) !important;
+            }
+
+            .player-series-title {
+                font-size: 15px !important;
+                white-space: nowrap !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+            }
+
+            .player-ep-title {
+                font-size: 12px !important;
+                white-space: nowrap !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+            }
+
+            .btn-close-player {
+                width: 36px !important;
+                height: 36px !important;
+                font-size: 15px !important;
+                flex-shrink: 0 !important;
+                background: rgba(255, 255, 255, 0.18) !important;
+            }
+
+            /* Server & Audio Pills as smooth horizontal swipe track */
+            .player-server-pills {
+                display: flex !important;
+                flex-wrap: nowrap !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
                 gap: 6px !important;
+                margin: 0 !important;
+                padding: 2px 0 4px 0 !important;
+                scrollbar-width: none !important;
             }
 
+            .player-server-pills::-webkit-scrollbar {
+                display: none !important;
+            }
+
+            .server-pill-btn {
+                flex-shrink: 0 !important;
+                font-size: 11px !important;
+                padding: 6px 11px !important;
+                white-space: nowrap !important;
+                border-radius: 20px !important;
+            }
+
+            /* Bottom Controls OSD on Mobile */
+            .player-bottom-controls {
+                padding: 10px 14px calc(14px + env(safe-area-inset-bottom, 15px)) 14px !important;
+                gap: 8px !important;
+                background: linear-gradient(0deg, rgba(7, 10, 16, 0.95) 0%, rgba(7, 10, 16, 0.6) 80%, transparent 100%) !important;
+            }
+
+            .scrubber-container {
+                height: 28px !important;
+            }
+
+            .scrubber-track {
+                height: 5px !important;
+            }
+
+            .scrubber-thumb {
+                width: 14px !important;
+                height: 14px !important;
+                transform: translate(-50%, -50%) scale(1) !important;
+            }
+
+            /* Hide verbose button text labels on mobile */
+            .btn-ctrl .btn-text,
+            #playBtnText {
+                display: none !important;
+            }
+
+            /* Hide TV remote colors legend on mobile */
             .remote-colors-legend {
                 display: none !important;
             }
 
-            .sub-sync-group {
-                margin-left: 0 !important;
+            /* Controls Toolbar: Play + Time on Left, Compact Action Icons on Right */
+            .controls-toolbar {
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                width: 100% !important;
+                gap: 8px !important;
             }
 
-            .btn-ctrl {
-                min-height: 40px !important;
-                padding: 6px 10px !important;
+            .left-controls {
+                display: flex !important;
+                align-items: center !important;
+                gap: 10px !important;
+                flex-shrink: 0 !important;
+            }
+
+            .time-display {
                 font-size: 12px !important;
+                font-weight: 600 !important;
+                color: rgba(255, 255, 255, 0.85) !important;
+                white-space: nowrap !important;
+            }
+
+            .right-controls {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: flex-end !important;
+                gap: 6px !important;
+                flex-wrap: nowrap !important;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+                scrollbar-width: none !important;
+            }
+
+            .right-controls::-webkit-scrollbar {
+                display: none !important;
+            }
+
+            /* Touch-Friendly Compact Icon Buttons (No Apiñamiento) */
+            .btn-ctrl {
+                min-width: 38px !important;
+                width: 38px !important;
+                height: 38px !important;
+                padding: 0 !important;
+                border-radius: 10px !important;
+                font-size: 13px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                flex-shrink: 0 !important;
+            }
+
+            .btn-ctrl.play-pause {
+                width: 44px !important;
+                height: 44px !important;
+                min-width: 44px !important;
+                border-radius: 50% !important;
+                font-size: 16px !important;
             }
 
             .btn-ctrl.btn-airplay {
+                width: auto !important;
+                min-width: 38px !important;
+                padding: 0 8px !important;
                 background: rgba(14, 165, 233, 0.22) !important;
                 border-color: rgba(14, 165, 233, 0.5) !important;
                 color: #38bdf8 !important;
-                font-weight: 700 !important;
+            }
+
+            .btn-ctrl#btnSubToggle {
+                width: auto !important;
+                min-width: 40px !important;
+                padding: 0 6px !important;
+                font-size: 11px !important;
+                gap: 3px !important;
+            }
+
+            /* Dedicated Clean Subtitle Sync Strip */
+            .player-sync-toolbar {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                width: 100% !important;
+                margin-top: 4px !important;
+            }
+
+            .player-sync-toolbar .remote-colors-legend {
+                display: none !important;
+            }
+
+            .sub-sync-group {
+                width: 100% !important;
+                max-width: 340px !important;
+                display: flex !important;
+                justify-content: center !important;
+                align-items: center !important;
+                gap: 4px !important;
+                margin: 0 auto !important;
+                padding: 4px 10px !important;
+                background: rgba(255, 255, 255, 0.06) !important;
+                border-radius: 12px !important;
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            }
+
+            .sub-sync-group span {
+                font-size: 11px !important;
+            }
+
+            .sub-sync-group .btn-ctrl {
+                min-width: 30px !important;
+                width: 30px !important;
+                height: 28px !important;
+                padding: 0 !important;
+                font-size: 10.5px !important;
+                border-radius: 6px !important;
             }
         }
 
@@ -3229,9 +3422,14 @@
             <div class="player-osd" id="playerOSD">
                 <!-- Top Header -->
                 <div class="player-header-osd">
-                    <div class="player-titles">
-                        <div class="player-series-title" id="playerSeriesTitle">Mushoku Tensei</div>
-                        <div class="player-ep-title" id="playerEpTitle">Episodio 1: Reencarnación sin empleo</div>
+                    <div class="player-header-top-row">
+                        <div class="player-titles">
+                            <div class="player-series-title" id="playerSeriesTitle">Mushoku Tensei</div>
+                            <div class="player-ep-title" id="playerEpTitle">Episodio 1: Reencarnación sin empleo</div>
+                        </div>
+                        <button class="btn-close-player" onclick="closePlayer()" title="Cerrar reproductor">
+                            <i class="fa fa-times"></i>
+                        </button>
                     </div>
                     <div class="player-server-pills" id="playerServerPills">
                         <button class="server-pill-btn active" data-srv="direct_native" onclick="switchPlayerServer('direct_native')">⚡ Stream Nativo (0 Anuncios)</button>
@@ -3240,9 +3438,6 @@
                         <button class="server-pill-btn" data-srv="audio_original" onclick="switchPlayerAudio('eng')">🇺🇸 VO + Sub</button>
                         <button class="server-pill-btn sub-upload-pill" onclick="triggerSubUpload()" title="Cargar subtítulo externo (.srt / .vtt)"><i class="fa fa-file-arrow-up"></i> +Sub ES</button>
                     </div>
-                    <button class="btn-close-player" onclick="closePlayer()" title="Cerrar reproductor">
-                        <i class="fa fa-times"></i>
-                    </button>
                 </div>
 
                 <!-- Bottom Controls Bar -->
@@ -3260,7 +3455,7 @@
                     <div class="controls-toolbar">
                         <div class="left-controls">
                             <button class="btn-ctrl play-pause" id="btnPlayPause" onclick="togglePlayPause()">
-                                <i class="fa fa-play" id="playIcon"></i> <span id="playBtnText">Reproducir</span>
+                                <i class="fa fa-play" id="playIcon"></i> <span id="playBtnText" class="btn-text">Reproducir</span>
                             </button>
                             <div class="time-display" id="timeDisplay">0:00 / 0:00</div>
                         </div>
@@ -3268,25 +3463,25 @@
                         <div class="right-controls">
                             <!-- Episodio Anterior -->
                             <button class="btn-ctrl" id="btnPrevEp" onclick="playAdjacentEpisode(-1)" title="Episodio Anterior">
-                                <i class="fa fa-backward-step"></i> Ant
+                                <i class="fa fa-backward-step"></i> <span class="btn-text">Ant</span>
                             </button>
 
                             <!-- Siguiente Episodio -->
                             <button class="btn-ctrl" id="btnNextEp" onclick="playAdjacentEpisode(1)" title="Siguiente Episodio">
-                                <i class="fa fa-forward-step"></i> Sig
+                                <i class="fa fa-forward-step"></i> <span class="btn-text">Sig</span>
                             </button>
 
                             <!-- Lista de Episodios -->
                             <button class="btn-ctrl" id="btnListEps" onclick="openEpisodesFromPlayer()" title="Lista de Episodios">
-                                <i class="fa fa-list"></i> Episodios
+                                <i class="fa fa-list"></i> <span class="btn-text">Episodios</span>
                             </button>
 
                             <!-- AirPlay Nativo (Apple TV / iOS Safari) -->
                             <button class="btn-ctrl btn-airplay" id="btnAirPlay" onclick="triggerAirPlay()" title="Transmitir con AirPlay" style="display:none;">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:middle; margin-right:4px;">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" style="vertical-align:middle;">
                                     <path d="M6 17h12l-6-6zM4 19h16v2H4z"/>
                                 </svg>
-                                <span>AirPlay</span>
+                                <span class="btn-text" style="margin-left:4px;">AirPlay</span>
                             </button>
 
                             <!-- Subtítulos Español CC -->
@@ -3297,22 +3492,25 @@
                             <button class="btn-ctrl" id="btnSubTrackSwitch" onclick="switchSpanishSubTrack()" title="Cambiar pista de subtítulos (Pista 1 / Pista 2)" style="display:none; padding:6px 10px; font-size:11px;">
                                 <i class="fa fa-layer-group"></i> <span id="subTrackText">Pista 1</span>
                             </button>
-                            <!-- Subtítulos Sync Micro-Ajuste Calibrador -->
-                            <div class="sub-sync-group" style="display:inline-flex; align-items:center; gap:3px; margin-left:6px; background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:10px; border:1px solid rgba(255,255,255,0.1);">
-                                <span style="font-size:11px; color:#aaa; font-weight:600;"><i class="fa fa-stopwatch"></i> Sync:</span>
-                                <button class="btn-ctrl" id="btnSubSyncMinus1" onclick="adjustSubSync(-1.0)" title="Atrasar 1s" style="padding:4px 6px; font-size:11px;">-1s</button>
-                                <button class="btn-ctrl" id="btnSubSyncMinus" onclick="adjustSubSync(-0.5)" title="Atrasar 0.5s" style="padding:4px 6px; font-size:11px;">-0.5s</button>
-                                <span id="subSyncBadge" style="font-size:12px; color:#30d158; font-weight:800; min-width:32px; text-align:center;">0s</span>
-                                <button class="btn-ctrl" id="btnSubSyncPlus" onclick="adjustSubSync(0.5)" title="Adelantar 0.5s" style="padding:4px 6px; font-size:11px;">+0.5s</button>
-                                <button class="btn-ctrl" id="btnSubSyncPlus1" onclick="adjustSubSync(1.0)" title="Adelantar 1s" style="padding:4px 6px; font-size:11px;">+1s</button>
-                                <button class="btn-ctrl" id="btnSubSyncReset" onclick="setSubSyncOffset(0.0)" title="Reiniciar a 0s" style="padding:4px 6px; font-size:11px;"><i class="fa fa-rotate-left"></i></button>
-                            </div>
-                            <!-- Leyenda de colores del mando LG -->
-                            <div class="remote-colors-legend" style="display:inline-flex; align-items:center; gap:8px; margin-left:10px; font-size:10px; color:#888;">
-                                <span><span style="color:#ff453a;">●</span> -0.5s</span>
-                                <span><span style="color:#0a84ff;">●</span> +0.5s</span>
-                                <span><span style="color:#30d158;">●</span> 0s</span>
-                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Subtítulos Sync Micro-Ajuste Calibrador Row -->
+                    <div class="player-sync-toolbar" id="playerSyncToolbar">
+                        <div class="sub-sync-group">
+                            <span style="font-size:11px; color:#aaa; font-weight:600;"><i class="fa fa-stopwatch"></i> Sync:</span>
+                            <button class="btn-ctrl" id="btnSubSyncMinus1" onclick="adjustSubSync(-1.0)" title="Atrasar 1s" style="padding:4px 6px; font-size:11px;">-1s</button>
+                            <button class="btn-ctrl" id="btnSubSyncMinus" onclick="adjustSubSync(-0.5)" title="Atrasar 0.5s" style="padding:4px 6px; font-size:11px;">-0.5s</button>
+                            <span id="subSyncBadge" style="font-size:12px; color:#30d158; font-weight:800; min-width:32px; text-align:center;">0s</span>
+                            <button class="btn-ctrl" id="btnSubSyncPlus" onclick="adjustSubSync(0.5)" title="Adelantar 0.5s" style="padding:4px 6px; font-size:11px;">+0.5s</button>
+                            <button class="btn-ctrl" id="btnSubSyncPlus1" onclick="adjustSubSync(1.0)" title="Adelantar 1s" style="padding:4px 6px; font-size:11px;">+1s</button>
+                            <button class="btn-ctrl" id="btnSubSyncReset" onclick="setSubSyncOffset(0.0)" title="Reiniciar a 0s" style="padding:4px 6px; font-size:11px;"><i class="fa fa-rotate-left"></i></button>
+                        </div>
+                        <!-- Leyenda de colores del mando LG -->
+                        <div class="remote-colors-legend" style="display:inline-flex; align-items:center; gap:8px; margin-left:10px; font-size:10px; color:#888;">
+                            <span><span style="color:#ff453a;">●</span> -0.5s</span>
+                            <span><span style="color:#0a84ff;">●</span> +0.5s</span>
+                            <span><span style="color:#30d158;">●</span> 0s</span>
                         </div>
                     </div>
                 </div>
