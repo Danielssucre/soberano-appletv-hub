@@ -13905,9 +13905,7 @@
             }
             directServersQueue = [];
             currentServerIndex = 0;
-            video.pause();
-            video.removeAttribute('src');
-            video.load();
+            try { video.pause(); } catch(e) {}
 
             if (customSub) {
                 currentCustomSub = customSub;
@@ -14172,17 +14170,26 @@
             const isNativeAppleHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
             const isHls = tmdbDirectStreamUrl.includes('.m3u8');
 
+            if (video._currentOnLoadedMeta) {
+                video.removeEventListener('loadedmetadata', video._currentOnLoadedMeta);
+                video._currentOnLoadedMeta = null;
+            }
             const onLoadedMeta = () => {
                 video.removeEventListener('loadedmetadata', onLoadedMeta);
+                video._currentOnLoadedMeta = null;
                 clearTimeout(playbackWatchdog);
                 if (startTime > 0) video.currentTime = startTime;
                 video.play().catch(e => console.log('TMDB play wait:', e));
             };
+            video._currentOnLoadedMeta = onLoadedMeta;
             video.addEventListener('loadedmetadata', onLoadedMeta);
 
             video.onerror = (e) => {
                 console.warn(`[TMDB PLAYER] Error en servidor [${cleanName}], intentando siguiente...`, e);
-                video.removeEventListener('loadedmetadata', onLoadedMeta);
+                if (video._currentOnLoadedMeta) {
+                    video.removeEventListener('loadedmetadata', video._currentOnLoadedMeta);
+                    video._currentOnLoadedMeta = null;
+                }
                 executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
             };
 

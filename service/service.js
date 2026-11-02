@@ -682,7 +682,7 @@ async function translateRawSubToSpanishVtt(rawSub) {
     return outVtt;
 }
 
-async function resolveAutoSpanishSubtitle(params, reqHost) {
+async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
     let tmdbId = String(params.id || '').trim();
     let type = (params.type === 'movie' || params.type === 'tv') ? params.type : (params.s || params.season || params.e || params.episode ? 'tv' : 'movie');
     const s = parseInt(params.s || params.season || 1, 10) || 1;
@@ -698,7 +698,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
         const ninkuPath = path.join(SUBTITLES_DIR, ninkuFile);
         if (fs.existsSync(ninkuPath)) {
             const vttContent = fs.readFileSync(ninkuPath, 'utf8');
-            const vttUrl = `http://${reqHost}/subtitles/${ninkuFile}`;
+            const vttUrl = `${reqProto}://${reqHost}/subtitles/${ninkuFile}`;
             return {
                 status: 'ok',
                 tmdb_id: tmdbId || 'ninku',
@@ -782,7 +782,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
         const locName = alignedName(type, tmdbId, s, e);
         const locPath = path.join(SUBTITLES_DIR, locName);
         if (fs.existsSync(locPath) && !isCorruptedSubFile(locPath)) {
-            const locUrl = `http://${reqHost}/subtitles/${locName}`;
+            const locUrl = `${reqProto}://${reqHost}/subtitles/${locName}`;
             esCandidates.push({
                 label: '🎯 Español (Sincronizado Audio)',
                 raw_url: locUrl,
@@ -810,14 +810,14 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
                         esCandidates.push({
                             label: `OpenSubtitles Español #${osEsCount}`,
                             raw_url: sub.url,
-                            url: `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`
+                            url: `${reqProto}://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`
                         });
                     } else if ((lang === 'eng' || lang === 'en') && osEnCount < 2) {
                         osEnCount++;
                         enFallbackCandidates.push({
                             label: `Español IA (Traducido de OpenSubtitles #${osEnCount})`,
                             raw_url: sub.url,
-                            url: `http://${reqHost}/api/sub_translate?url=${encodeURIComponent(sub.url)}`,
+                            url: `${reqProto}://${reqHost}/api/sub_translate?url=${encodeURIComponent(sub.url)}`,
                             needsTranslation: true
                         });
                     }
@@ -905,7 +905,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
             const tracksOut = pool.map((t, i) => ({
                 index: i,
                 label: t.label,
-                url: t.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`),
+                url: t.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`),
                 raw_url: t.raw_url
             }));
 
@@ -916,7 +916,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
                 selected_index: idx,
                 total_tracks: pool.length,
                 label: cand.label,
-                vtt_url: cand.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`),
+                vtt_url: cand.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`),
                 vtt_content: vttContent,
                 tracks: tracksOut
             };
@@ -939,9 +939,9 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
                     selected_index: 0,
                     total_tracks: 1,
                     label: fb.label,
-                    vtt_url: fb.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`),
+                    vtt_url: fb.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`),
                     vtt_content: vttTrans,
-                    tracks: [{ index: 0, label: fb.label, url: fb.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`) }]
+                    tracks: [{ index: 0, label: fb.label, url: fb.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`) }]
                 };
             }
         } catch(eFb) {}
@@ -955,7 +955,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost) {
     };
 }
 
-function decorateWithAligned(data, id, type, s, e, reqHost) {
+function decorateWithAligned(data, id, type, s, e, reqHost, reqProto = "http") {
     if (!data || data.status !== 'ok') return data;
     // Si el contenido proviene de Cuevana3c (Latino o Inglés Subtitulado), suprimir subtítulos externos (los subtítulos ya vienen integrados en el video)
     if (data.server && data.server.includes('Cuevana3c')) {
@@ -966,7 +966,7 @@ function decorateWithAligned(data, id, type, s, e, reqHost) {
     const p = path.join(SUBTITLES_DIR, name);
     out.aligned = false;
     if (fs.existsSync(p) && !isCorruptedSubFile(p)) {
-        const url0 = `http://${reqHost}/subtitles/${name}`;
+        const url0 = `${reqProto}://${reqHost}/subtitles/${name}`;
         out.aligned = true;
         out.aligned_url = url0;
         out.sub_es = url0;
@@ -998,17 +998,17 @@ function triggerAlign(id, type, s, e, streamUrl) {
     });
 }
 
-function rewriteSubHost(data, reqHost) {
+function rewriteSubHost(data, reqHost, reqProto = "http") {
     if (!data) return data;
     const out = Object.assign({}, data);
     if (out.sub_es && out.sub_es.includes('/api/sub_')) {
-        out.sub_es = out.sub_es.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`);
+        out.sub_es = out.sub_es.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`);
     }
     if (Array.isArray(out.subtitles)) {
         out.subtitles = out.subtitles.map(s => {
             const copy = Object.assign({}, s);
             if (copy.url && copy.url.includes('/api/sub_')) {
-                copy.url = copy.url.replace(/^http:\/\/[^/]+\//, `http://${reqHost}/`);
+                copy.url = copy.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`);
             }
             return copy;
         });
@@ -1479,7 +1479,7 @@ async function fetchFramexCluster(url, timeoutMs = 5000) {
     }
 }
 
-async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang = 'en', reqHost = '127.0.0.1:9099') {
+async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang = 'en', reqHost = '127.0.0.1:9099', reqProto = 'http') {
     const isTv = type === 'tv';
     // CRÍTICO: Pasar tanto season/episode como s/e garantiza resolución exacta de temporada/episodio en todos los clusters
     const baseQ = isTv
@@ -1513,7 +1513,7 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
                 const isEs = /(?:^|[^a-z])(?:spa|spl|spn|es(?:-[a-z0-9]+)?|espa[ñn]ol|spanish|castellano|latino)(?:$|[^a-z])/i.test(langCode);
                 if (isEs) {
                     seenSubUrls.add(sub.url);
-                    const proxiedSub = `http://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`;
+                    const proxiedSub = `${reqProto}://${reqHost}/api/sub_proxy?url=${encodeURIComponent(sub.url)}`;
                     allSubs.push({
                         url: proxiedSub,
                         raw_url: sub.url,
@@ -1589,13 +1589,13 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
     }
 }
 
-async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '', forceRefresh = false) {
+async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '', forceRefresh = false, reqProto = 'http') {
     const cacheKey = `${id}_${type}_${s}_${e}`;
     const now = Date.now();
     const cached = TMDB_STREAM_CACHE.get(cacheKey);
     // TTL de 15 minutos (900000 ms) para garantizar tokens CDN frescos y detección rápida de nuevos episodios
     if (!forceRefresh && cached && (now - cached.ts < 900000)) {
-        return decorateWithAligned(rewriteSubHost(cached.data, reqHost), id, type, s, e, reqHost);
+        return decorateWithAligned(rewriteSubHost(cached.data, reqHost, reqProto), id, type, s, e, reqHost, reqProto);
     }
 
     let titles = [expectedTitle, expectedOrigTitle].filter(Boolean);
@@ -1621,7 +1621,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
         const triResults = await safeAll([
             resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
             resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
-            resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost)
+            resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto)
         ]);
 
         const framexCands = triResults[2] || [];
@@ -1651,7 +1651,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
             }));
             console.log(`[MULTI_CLUSTER_RESOLVER SUCCESS] Stream ganador seleccionado (${primary.server}, score: ${primary.score}, total servers: ${primary.servers.length}):`, primary.direct_stream_url.slice(0, 80) + '...');
             TMDB_STREAM_CACHE.set(cacheKey, { data: primary, ts: now });
-            return decorateWithAligned(primary, id, type, s, e, reqHost);
+            return decorateWithAligned(primary, id, type, s, e, reqHost, reqProto);
         }
     } catch (triErr) {
         console.warn(`[MULTI_CLUSTER_RESOLVER] Error durante resolución: ${triErr.message}`);
@@ -1669,7 +1669,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
 // 4. STREAM EXTRACTION & NATIVE HLS REWRITER
 // ==============================================================================
 
-async function resolveJkStream(slug, epNum, reqHost) {
+async function resolveJkStream(slug, epNum, reqHost, reqProto = "http") {
     let normalizedSlug = slug;
     if (slug === 'mushoku') normalizedSlug = 'mushoku-tensei-isekai-ittara-honki-dasu';
     if (slug === 'black_clover') normalizedSlug = 'black-clover-tv';
@@ -1726,7 +1726,7 @@ async function resolveJkStream(slug, epNum, reqHost) {
                 directM3u8 = extracted;
             }
 
-            const proxiedUrl = `http://${reqHost}/stream.m3u8?url=${encodeURIComponent(target)}&slug=${encodeURIComponent(slug)}&ep=${epNum}`;
+            const proxiedUrl = `${reqProto}://${reqHost}/stream.m3u8?url=${encodeURIComponent(target)}&slug=${encodeURIComponent(slug)}&ep=${epNum}`;
 
             servers.push({
                 name: sName,
@@ -1745,7 +1745,7 @@ async function resolveJkStream(slug, epNum, reqHost) {
         slug: slug,
         episode: parseInt(epNum, 10),
         m3u8_url: directM3u8,
-        stream_url: directM3u8 ? `http://${reqHost}/stream.m3u8?url=${encodeURIComponent(directM3u8)}&slug=${encodeURIComponent(slug)}&ep=${epNum}` : '',
+        stream_url: directM3u8 ? `${reqProto}://${reqHost}/stream.m3u8?url=${encodeURIComponent(directM3u8)}&slug=${encodeURIComponent(slug)}&ep=${epNum}` : '',
         servers: servers
     };
 
@@ -1756,7 +1756,7 @@ async function resolveJkStream(slug, epNum, reqHost) {
     return result;
 }
 
-function resolveNinku(epNum, reqHost) {
+function resolveNinku(epNum, reqHost, reqProto = "http") {
     const ep = Math.max(1, Math.min(55, parseInt(epNum, 10) || 1));
     const epPad = String(ep).padStart(2, '0');
     const archiveUrl = `https://archive.org/download/Ninku-English-Sub/Ninku%20%5BEpisode%20${epPad}%5D%20English%20Sub.mp4`;
@@ -1788,7 +1788,7 @@ function resolveNinku(epNum, reqHost) {
     if (fs.existsSync(subDisk)) {
         subtitles.push({
             label: 'Español (Oficial)',
-            src: `http://${reqHost}/subtitles/${subFile}`,
+            src: `${reqProto}://${reqHost}/subtitles/${subFile}`,
             srclang: 'es',
             default: true
         });
@@ -1810,7 +1810,9 @@ function resolveNinku(epNum, reqHost) {
 
 const server = http.createServer(async (req, res) => {
     const parsed = url.parse(req.url, true);
+    const reqProto = (req.headers['x-forwarded-proto'] || (req.connection && req.connection.encrypted ? 'https' : 'http')).split(',')[0].trim();
     const reqHost = req.headers.host || `127.0.0.1:${PORT}`;
+    const hostBase = `${reqProto}://${reqHost}`;
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
@@ -1998,7 +2000,7 @@ const server = http.createServer(async (req, res) => {
             const origLang = parsed.query.orig_lang || 'en';
             const expectedTitle = parsed.query.title || '';
             const expectedOrigTitle = parsed.query.orig_title || '';
-            const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, expectedTitle, expectedOrigTitle, forceRefresh);
+            const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, expectedTitle, expectedOrigTitle, forceRefresh, reqProto);
             const jsonStr = JSON.stringify(streamData);
             res.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
@@ -2073,7 +2075,7 @@ const server = http.createServer(async (req, res) => {
     // Busca, valida lingüísticamente en español y convierte a WebVTT bajo demanda cuando el usuario presiona el botón de subtítulos
     if (parsed.pathname === '/api/subtitles/auto' || parsed.pathname === '/api/sub_auto') {
         try {
-            const subRes = await resolveAutoSpanishSubtitle(parsed.query || {}, reqHost);
+            const subRes = await resolveAutoSpanishSubtitle(parsed.query || {}, reqHost, reqProto);
             res.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
                 'Cache-Control': 'no-store',
@@ -2195,9 +2197,9 @@ const server = http.createServer(async (req, res) => {
 
         let data;
         if (slug === 'ninku') {
-            data = resolveNinku(ep, reqHost);
+            data = resolveNinku(ep, reqHost, reqProto);
         } else {
-            data = await resolveJkStream(slug, ep, reqHost);
+            data = await resolveJkStream(slug, ep, reqHost, reqProto);
         }
 
         const jsonStr = JSON.stringify(data);
@@ -2232,7 +2234,7 @@ const server = http.createServer(async (req, res) => {
                     if (!variantUrl.startsWith('http://') && !variantUrl.startsWith('https://')) {
                         variantUrl = url.resolve(baseUrl, trimmed);
                     }
-                    return `http://${reqHost}/stream.m3u8?url=${encodeURIComponent(variantUrl)}`;
+                    return `${hostBase}/stream.m3u8?url=${encodeURIComponent(variantUrl)}`;
                 }).join('\n');
 
                 res.writeHead(200, {
@@ -2252,7 +2254,7 @@ const server = http.createServer(async (req, res) => {
                     fullSegUrl = url.resolve(baseUrl, trimmed);
                 }
                 segUrls.push(fullSegUrl);
-                return `http://${reqHost}/stream?url=${encodeURIComponent(fullSegUrl)}`;
+                return `${hostBase}/stream?url=${encodeURIComponent(fullSegUrl)}`;
             }).join('\n');
 
             CURRENT_PLAYLIST_SEGMENTS = segUrls;
