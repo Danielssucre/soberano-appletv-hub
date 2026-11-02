@@ -1300,12 +1300,19 @@ const server = http.createServer(async (req, res) => {
 
     // Health & Silicon Telemetry
     if (parsed.pathname === '/status' || parsed.pathname === '/stats') {
+        let publicUrl = null;
+        try {
+            if (fs.existsSync('/media/developer/temp/public_url.txt')) {
+                publicUrl = fs.readFileSync('/media/developer/temp/public_url.txt', 'utf8').trim();
+            }
+        } catch(e) {}
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({
             status: 'ok',
             device: 'LG_webOS_SmartTV_OnDevice',
             engine: 'Node.js 8.12 (ARMv7 Realtek)',
             service: 'com.soberano.appletvhub.service',
+            tunnel_url: publicUrl,
             catalog_animes_total: 5059,
             cached_pages: CATALOG_CACHE.size,
             cached_streams: STREAM_CACHE.size,
@@ -1313,6 +1320,23 @@ const server = http.createServer(async (req, res) => {
             cached_segment_bytes: TOTAL_CACHE_BYTES,
             memory: process.memoryUsage(),
             timestamp: Date.now()
+        }));
+    }
+
+    // Cloudflare Remote Access Tunnel Telemetry
+    if (parsed.pathname === '/api/tunnel' || parsed.pathname === '/tunnel') {
+        let publicUrl = null;
+        try {
+            if (fs.existsSync('/media/developer/temp/public_url.txt')) {
+                publicUrl = fs.readFileSync('/media/developer/temp/public_url.txt', 'utf8').trim();
+            }
+        } catch(e) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({
+            status: publicUrl ? 'active' : 'inactive',
+            tunnel_url: publicUrl,
+            remote_access: publicUrl ? `${publicUrl}/ipad` : null,
+            device: 'LG_webOS_SmartTV_OnDevice'
         }));
     }
 
