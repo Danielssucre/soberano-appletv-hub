@@ -2125,11 +2125,32 @@ const server = http.createServer(async (req, res) => {
         // Resolver EXCLUSIVAMENTE el Torrent real en RAM + JIT HLS vía Mac M3 Daemon (puerto 9097)
         // PROHIBIDO hacer fallback al proveedor de películas/series (Cuevana/Framex)
         try {
+            // Pre-warm asíncrono de subtítulos en español para anclarlos antes de que el reproductor pida seg_0000
+            const subPrewarmPromise = (!isEs && (id || title)) ? resolveAutoSpanishSubtitle({
+                id: id,
+                type: type,
+                s: s,
+                e: e,
+                title: title,
+                hash: infoHash
+            }, reqHost, reqProto).catch(function(eSub) {
+                console.warn('[SOBERANO_PLAY] Prewarm subtitulos:', eSub.message);
+                return null;
+            }) : Promise.resolve(null);
+
             const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}`;
             const daemonRes = await fetchJson(daemonUrl, {}, 26000);
             if (daemonRes && daemonRes.status === 'ok') {
                 const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
                 const directHlsUrl = `${reqProto}://${reqHost}/api/torrent/hls/${cleanHash}/index.m3u8`;
+
+                // Asegurar que el archivo de subtítulos esté en disco antes de enviar direct_stream_url
+                try {
+                    await Promise.race([
+                        subPrewarmPromise,
+                        new Promise(function(resolve) { setTimeout(resolve, 3000); })
+                    ]);
+                } catch(eWaitSub) {}
 
                 res.writeHead(200, {
                     'Content-Type': 'application/json; charset=utf-8',
@@ -2252,6 +2273,17 @@ const server = http.createServer(async (req, res) => {
                 let localDiskPath = path.join(SUBTITLES_DIR, infoHash + '_es.vtt');
                 if (!fs.existsSync(localDiskPath)) {
                     localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+                }
+
+                // Gating in-flight: si es de los primeros segmentos y el archivo aún no existe, esperar hasta 1000ms
+                if (!fs.existsSync(localDiskPath) && segIdx <= 2) {
+                    var waitStart = Date.now();
+                    while (!fs.existsSync(localDiskPath) && Date.now() - waitStart < 1000) {
+                        await new Promise(function(resolve) { setTimeout(resolve, 80); });
+                        if (!fs.existsSync(localDiskPath)) {
+                            localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+                        }
+                    }
                 }
                 let matchedCues = [];
                 if (fs.existsSync(localDiskPath)) {
