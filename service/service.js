@@ -1111,6 +1111,21 @@ function decryptCuevanaToken(token) {
     }
 }
 
+function checkM3u8Url(url, timeoutMs = 3000) {
+    return new Promise(resolve => {
+        try {
+            const client = url.startsWith('https') ? https : http;
+            const req = client.request(url, { method: 'HEAD', timeout: timeoutMs, headers: { 'User-Agent': 'Mozilla/5.0' } }, res => {
+                if (res.statusCode >= 200 && res.statusCode < 400) return resolve(true);
+                resolve(false);
+            });
+            req.on('error', () => resolve(false));
+            req.on('timeout', () => { req.destroy(); resolve(false); });
+            req.end();
+        } catch(e) { resolve(false); }
+    });
+}
+
 function unpackPackedJS(packedStr) {
     const m = packedStr.match(/}\('(.*)',\s*(\d+),\s*(\d+),\s*'([^']*)'\.split\('\|'\)\)/);
     if (!m) return '';
@@ -1349,8 +1364,20 @@ async function resolveCuevanaStreams(id, type, s, e, titles, yearTarget, origLan
     var isTv = type === 'tv';
     var matchedPageUrl = null;
 
+    var searchVariants = [];
     for (var i = 0; i < titles.length; i++) {
-        var titleQuery = titles[i];
+        var t = titles[i];
+        if (!t) continue;
+        searchVariants.push(t);
+        // Also add short base title before colon/dash (e.g. "Duna: Parte dos" -> "Duna")
+        var basePart = t.split(/[:\-–—]/)[0].trim();
+        if (basePart && basePart.length >= 3 && !searchVariants.includes(basePart)) {
+            searchVariants.push(basePart);
+        }
+    }
+
+    for (var i = 0; i < searchVariants.length; i++) {
+        var titleQuery = searchVariants[i];
         var cleanQuery = titleQuery.replace(/[:\-–—]/g, ' ').trim();
         var searchUrl = 'https://cuevana3c.pro/explorar?s=' + encodeURIComponent(cleanQuery);
         var searchHtml = await fetchText(searchUrl, { 'Referer': 'https://cuevana3c.pro/' }, 5000);
@@ -1440,13 +1467,19 @@ async function resolveCuevanaStreams(id, type, s, e, titles, yearTarget, origLan
                 var unpacked = unpackPackedJS(packedMatch[0]);
                 var m3u8Match = unpacked.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]+/);
                 if (m3u8Match) {
+                    var m3u8Url = m3u8Match[0];
+                    var isAlive = await checkM3u8Url(m3u8Url, 3000);
+                    if (!isAlive) {
+                        console.warn('[CUEVANA3C] m3u8 caído (502/timeout), descartando:', m3u8Url.slice(0, 80));
+                        continue;
+                    }
                     results.push({
                         status: 'ok',
                         id: id,
                         type: type,
                         season: s,
                         episode: e,
-                        direct_stream_url: m3u8Match[0],
+                        direct_stream_url: m3u8Url,
                         server: 'Cuevana3c ' + label + ' HD',
                         is_sub: tabSub,
                         quality: '1080p',
@@ -1667,6 +1700,69 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
     }
 }
 
+async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http') {
+    try {
+        let imdbId = null;
+        const extRes = await proxyTmdbRequest(`${type === 'tv' ? 'tv' : 'movie'}/${id}/external_ids`, '');
+        if (extRes && extRes.body) {
+            try {
+                const extData = JSON.parse(extRes.body);
+                if (extData && extData.imdb_id) imdbId = extData.imdb_id;
+            } catch(e) {}
+        }
+        if (!imdbId) return [];
+
+        const streamPath = type === 'tv' ? `series/${imdbId}:${s}:${e}.json` : `movie/${imdbId}.json`;
+        const tData = await fetchJson(`https://torrentio.strem.fun/stream/${streamPath}`, {}, 6000);
+        if (!tData || !Array.isArray(tData.streams)) return [];
+
+        const cands = [];
+        for (const str of tData.streams) {
+            const combined = `${str.name || ''} ${str.title || ''}`.toLowerCase();
+            let isSpanish = false;
+            if (/\b(castellano|español|espanol|latino|spanish)\b/.test(combined)) isSpanish = true;
+            else if (combined.includes('🇪🇸') || combined.includes('🇲🇽')) isSpanish = true;
+            else if (/[\/\[\.\-_\s](es|spa|esp)[\/\]\.\-_\s]/.test(combined)) isSpanish = true;
+            else if (/\b(audio latino|audio castellano|audio espanol|audio español|dual audio)\b/.test(combined)) isSpanish = true;
+
+            if (isSpanish && str.infoHash) {
+                const seedM = combined.match(/👤\s*(\d+)/);
+                const seeds = seedM ? parseInt(seedM[1], 10) : 0;
+                if (seeds < 1) continue;
+                const qualityM = combined.match(/2160p|4k|1080p|720p/i);
+                const quality = qualityM ? qualityM[0].toUpperCase() : 'HD';
+                const firstLine = (str.title || '').split('\n')[0].replace(/[^\w\s\.\-\[\]\(\)]/g, ' ').slice(0, 32).trim();
+                const fileIdx = str.fileIdx !== undefined ? str.fileIdx : 0;
+
+                const playUrl = `${reqProto}://${reqHost}/api/soberano/play_stream?hash=${encodeURIComponent(str.infoHash)}&idx=${fileIdx}&name=${encodeURIComponent(firstLine)}&type=${type}&s=${s}&e=${e}&is_es=1`;
+
+                cands.push({
+                    status: 'ok',
+                    id: String(id),
+                    type: type,
+                    season: String(s),
+                    episode: String(e),
+                    direct_stream_url: playUrl,
+                    server: `Torrent Swarm • ${firstLine} (${quality}) [${seeds}s]`,
+                    is_sub: false,
+                    quality: quality,
+                    format: 'hls',
+                    audio_es: true,
+                    sub_es: null,
+                    subtitles: [],
+                    seeds: seeds,
+                    base_bonus: Math.min(seeds * 2, 200)
+                });
+            }
+        }
+        cands.sort((a, b) => b.seeds - a.seeds);
+        return cands;
+    } catch(err) {
+        console.warn(`[TORRENT_FEDERATOR] Error para ${id} (${type} S${s}E${e}):`, err.message);
+        return [];
+    }
+}
+
 async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '', forceRefresh = false, reqProto = 'http', preferSpanish = false) {
     const cacheKey = `${id}_${type}_${s}_${e}_${preferSpanish ? 'es' : 'all'}`;
     const now = Date.now();
@@ -1693,16 +1789,18 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
     } catch(e) {}
     titles = Array.from(new Set(titles.filter(Boolean)));
 
-    console.log(`[MULTI_CLUSTER_RESOLVER] Consultando Cuevana3c, Gnula y 4 Clusters Framex para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
+    console.log(`[MULTI_CLUSTER_RESOLVER] Consultando Cuevana3c, Gnula, Torrents y 4 Clusters Framex para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
 
     try {
         const triResults = await safeAll([
             resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
             resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
-            resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto)
+            resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto),
+            preferSpanish ? resolveTmdbTorrents(id, type, s, e, reqHost, reqProto) : Promise.resolve([])
         ]);
 
         const framexCands = triResults[2] || [];
+        const torrentCands = triResults[3] || [];
         let sharedEsSub = null;
         let sharedAllSubs = [];
         for (let fIdx = 0; fIdx < framexCands.length; fIdx++) {
@@ -1712,7 +1810,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
             }
         }
 
-        const allCandidates = [].concat(triResults[0] || [], triResults[1] || [], framexCands);
+        const allCandidates = [].concat(triResults[0] || [], triResults[1] || [], torrentCands, framexCands);
         console.log(`[MULTI_CLUSTER_RESOLVER] Total candidatos brutos obtenidos: ${allCandidates.length}`);
 
         const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang, sharedEsSub, sharedAllSubs, preferSpanish);
@@ -2211,6 +2309,38 @@ const server = http.createServer(async (req, res) => {
         } catch(eStreams) {
             res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             return res.end(JSON.stringify({ status: 'error', message: eStreams.message, streams: [] }));
+        }
+    }
+
+    if (parsed.pathname === '/api/soberano/play_stream') {
+        const infoHash = (parsed.query.hash || parsed.query.infoHash || '').toLowerCase().trim();
+        const fileIdx = parseInt(parsed.query.idx || parsed.query.fileIdx || 0, 10);
+        const title = parsed.query.name || parsed.query.title || 'video';
+        const isEs = parsed.query.is_es === '1' || parsed.query.is_es === 'true';
+
+        if (!infoHash) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            return res.end('Missing infoHash');
+        }
+
+        try {
+            const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}`;
+            const daemonRes = await fetchJson(daemonUrl, {}, 35000);
+            if (daemonRes && daemonRes.status === 'ok') {
+                const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
+                const targetM3u8 = `${reqProto}://${reqHost}/api/torrent/hls/${cleanHash}/index.m3u8`;
+                res.writeHead(302, {
+                    'Location': targetM3u8,
+                    'Cache-Control': 'no-store',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                return res.end();
+            }
+            res.writeHead(502, { 'Content-Type': 'text/plain' });
+            return res.end('Failed to resolve torrent stream on daemon');
+        } catch(e) {
+            res.writeHead(504, { 'Content-Type': 'text/plain' });
+            return res.end('Timeout connecting to torrent daemon: ' + e.message);
         }
     }
 
