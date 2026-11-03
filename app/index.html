@@ -3705,15 +3705,18 @@
              VISTA 2: PELÍCULAS (CINE GLOBAL HD TMDB)
              ========================================== -->
         <div id="viewMovies" style="display:none;">
-            <!-- SOBERANO CALIDAD FILTER BAR -->
+            <!-- SOBERANO CALIDAD & IDIOMA FILTER BAR -->
             <div class="quality-filter-bar">
                 <div class="quality-filter-left">
-                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtro de Calidad:</span>
+                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtros:</span>
                     <button class="filter-pill active" id="filterMovieAll" tabindex="0" onclick="setQualityFilter('all')">
                         <i class="fa fa-film"></i> Todo el Catálogo
                     </button>
                     <button class="filter-pill" id="filterMovieHD" tabindex="0" onclick="setQualityFilter('hd')">
                         <i class="fa fa-sparkles" style="color:#30d158;"></i> ✨ Solo 1080p Full HD
+                    </button>
+                    <button class="filter-pill" id="filterMovieSpanish" tabindex="0" onclick="toggleSpanishLanguageFilter()">
+                        <i class="fa fa-language" style="color:#ff9f0a;"></i> 🇪🇸 Solo en Español
                     </button>
                 </div>
                 <div class="quality-filter-status" id="movieQualityStatus">
@@ -3825,15 +3828,18 @@
              VISTA 3: SERIES DE TELEVISIÓN (GLOBAL TMDB)
              ========================================== -->
         <div id="viewSeries" style="display:none;">
-            <!-- SOBERANO CALIDAD FILTER BAR -->
+            <!-- SOBERANO CALIDAD & IDIOMA FILTER BAR -->
             <div class="quality-filter-bar">
                 <div class="quality-filter-left">
-                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtro de Calidad:</span>
+                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtros:</span>
                     <button class="filter-pill active" id="filterSeriesAll" tabindex="0" onclick="setQualityFilter('all')">
                         <i class="fa fa-tv"></i> Todo el Catálogo
                     </button>
                     <button class="filter-pill" id="filterSeriesHD" tabindex="0" onclick="setQualityFilter('hd')">
                         <i class="fa fa-sparkles" style="color:#30d158;"></i> ✨ Solo 1080p Full HD
+                    </button>
+                    <button class="filter-pill" id="filterSeriesSpanish" tabindex="0" onclick="toggleSpanishLanguageFilter()">
+                        <i class="fa fa-language" style="color:#ff9f0a;"></i> 🇪🇸 Solo en Español
                     </button>
                 </div>
                 <div class="quality-filter-status" id="seriesQualityStatus">
@@ -3926,6 +3932,7 @@
 
                 <!-- Chips de Búsqueda Rápida de Tendencias -->
                 <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:16px;">
+                    <button class="genre-chip" id="chipSoberanoSpanish" onclick="toggleSoberanoSpanishFilter()" style="background:rgba(255,159,10,0.2); border-color:rgba(255,159,10,0.5); color:#ffd60a; font-weight:700;">🇪🇸 Solo en Español</button>
                     <button class="genre-chip" onclick="quickSoberanoSearch('Dune')">🎬 Dune</button>
                     <button class="genre-chip" onclick="quickSoberanoSearch('Interstellar')">🚀 Interstellar</button>
                     <button class="genre-chip" onclick="quickSoberanoSearch('Severance')">📺 Severance</button>
@@ -4181,8 +4188,13 @@
                     </div>
                 </div>
 
-                <div style="margin:16px 0 10px; display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size:14px; font-weight:700; color:#fff;"><i class="fa fa-server" style="color:#e879f9;"></i> Enjambre de Torrents Disponibles</span>
+                <div style="margin:16px 0 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:14px; font-weight:700; color:#fff;"><i class="fa fa-server" style="color:#e879f9;"></i> Enjambre de Torrents Disponibles</span>
+                        <button class="filter-pill" id="btnSwarmSpanishFilter" onclick="toggleSwarmSpanishFilter()" style="padding:3px 10px; font-size:11.5px; border-radius:12px; background:rgba(255,159,10,0.18); border-color:rgba(255,159,10,0.4); color:#ffd60a;">
+                            <i class="fa fa-language"></i> 🇪🇸 Solo Español
+                        </button>
+                    </div>
                     <span id="soberanoTorrentCountBadge" style="font-size:12px; color:var(--text-muted); background:rgba(255,255,255,0.08); padding:4px 10px; border-radius:20px;">Consultando...</span>
                 </div>
 
@@ -13400,6 +13412,8 @@
         // SOBERANO HD QUALITY DETECTION & FILTER ENGINE ($0 USD)
         // ==============================================================================
         let currentQualityFilter = localStorage.getItem('soberano_quality_filter') || 'all';
+        let currentSpanishOnlyFilter = localStorage.getItem('soberano_spanish_only') === '1';
+        let swarmSpanishOnly = false;
 
         function getMediaQualityInfo(item, mediaType = 'movie') {
             const type = item.media_type || mediaType || 'movie';
@@ -13498,12 +13512,76 @@
 
             const mStatus = document.getElementById('movieQualityStatus');
             if (mStatus) {
+                let statusHtml = '';
+                if (currentSpanishOnlyFilter) {
+                    statusHtml += '<span class="quality-status-tag" style="background:rgba(255,159,10,0.2); color:#ffd60a; border:1px solid rgba(255,159,10,0.45); font-weight:700;"><i class="fa fa-language"></i> 🇪🇸 Filtrado: Solo en Español</span> ';
+                }
                 if (isHDOnly) {
-                    mStatus.innerHTML = '<span class="quality-status-tag" style="background:rgba(48,209,88,0.2); color:#30d158; border:1px solid rgba(48,209,88,0.4);"><i class="fa fa-check-circle"></i> Mostrando solo títulos 1080p Full HD</span>';
+                    statusHtml += '<span class="quality-status-tag" style="background:rgba(48,209,88,0.2); color:#30d158; border:1px solid rgba(48,209,88,0.4);"><i class="fa fa-check-circle"></i> 1080p Full HD</span>';
+                } else if (!currentSpanishOnlyFilter) {
+                    statusHtml += '<span class="quality-status-tag"><i class="fa fa-info-circle"></i> Mostrando todo (1080p HD + Estrenos Cine)</span>';
+                }
+                mStatus.innerHTML = statusHtml;
+            }
+
+            const btnMSpanish = document.getElementById('filterMovieSpanish');
+            if (btnMSpanish) btnMSpanish.classList.toggle('active', currentSpanishOnlyFilter);
+            const btnSSpanish = document.getElementById('filterSeriesSpanish');
+            if (btnSSpanish) btnSSpanish.classList.toggle('active', currentSpanishOnlyFilter);
+        }
+
+        function toggleSpanishLanguageFilter() {
+            currentSpanishOnlyFilter = !currentSpanishOnlyFilter;
+            try {
+                localStorage.setItem('soberano_spanish_only', currentSpanishOnlyFilter ? '1' : '0');
+            } catch(e) {}
+            applyQualityFilterUI();
+            showToast(currentSpanishOnlyFilter ? '🇪🇸 Filtro activado: Solo títulos en español' : '🌐 Mostrando catálogo global');
+            if (currentMediaTab === 'movies') {
+                loadMoviesView(true);
+            } else if (currentMediaTab === 'series') {
+                loadSeriesView(true);
+            }
+        }
+
+        function toggleSoberanoSpanishFilter() {
+            currentSpanishOnlyFilter = !currentSpanishOnlyFilter;
+            try {
+                localStorage.setItem('soberano_spanish_only', currentSpanishOnlyFilter ? '1' : '0');
+            } catch(e) {}
+            const chip = document.getElementById('chipSoberanoSpanish');
+            if (chip) {
+                if (currentSpanishOnlyFilter) {
+                    chip.style.background = '#ffd60a';
+                    chip.style.color = '#000';
+                    chip.style.borderColor = '#ffd60a';
                 } else {
-                    mStatus.innerHTML = '<span class="quality-status-tag"><i class="fa fa-info-circle"></i> Mostrando todo (1080p HD + Estrenos Cine)</span>';
+                    chip.style.background = 'rgba(255,159,10,0.2)';
+                    chip.style.color = '#ffd60a';
+                    chip.style.borderColor = 'rgba(255,159,10,0.5)';
                 }
             }
+            showToast(currentSpanishOnlyFilter ? '🇪🇸 Filtro Soberano: Solo títulos y torrents en español' : '🌐 Modo global');
+            loadSoberanoView(true);
+        }
+
+        function toggleSwarmSpanishFilter() {
+            swarmSpanishOnly = !swarmSpanishOnly;
+            const btn = document.getElementById('btnSwarmSpanishFilter');
+            if (btn) {
+                if (swarmSpanishOnly) {
+                    btn.classList.add('active');
+                    btn.style.background = '#ffd60a';
+                    btn.style.color = '#000';
+                    btn.style.borderColor = '#ffd60a';
+                } else {
+                    btn.classList.remove('active');
+                    btn.style.background = 'rgba(255,159,10,0.18)';
+                    btn.style.color = '#ffd60a';
+                    btn.style.borderColor = 'rgba(255,159,10,0.4)';
+                }
+            }
+            renderSoberanoTorrentListFromCache();
         }
 
         function switchMediaTab(tab) {
@@ -13549,26 +13627,46 @@
             if (moviesLoaded && !forceRefresh) return;
             moviesLoaded = true;
 
-            fetchAndRenderTmdbRow('/api/tmdb/trending/movie/day', 'trackMoviesTrending', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/movie/top_rated', 'trackMoviesTop', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=28', 'trackMoviesAction', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=878', 'trackMoviesScifi', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/movie/now_playing', 'trackMoviesCartelera', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=27', 'trackMoviesHorror', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=53', 'trackMoviesThriller', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=16', 'trackMoviesAnimation', 'movie');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=35', 'trackMoviesComedy', 'movie');
+            if (currentSpanishOnlyFilter) {
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&sort_by=popularity.desc', 'trackMoviesTrending', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&sort_by=vote_average.desc&vote_count.gte=50', 'trackMoviesTop', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&with_genres=28&sort_by=popularity.desc', 'trackMoviesAction', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&with_genres=878&sort_by=popularity.desc', 'trackMoviesScifi', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&primary_release_date.gte=2024-01-01&sort_by=popularity.desc', 'trackMoviesCartelera', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&with_genres=27&sort_by=popularity.desc', 'trackMoviesHorror', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&with_genres=53&sort_by=popularity.desc', 'trackMoviesThriller', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&with_genres=16&sort_by=popularity.desc', 'trackMoviesAnimation', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_original_language=es&with_genres=35&sort_by=popularity.desc', 'trackMoviesComedy', 'movie');
+            } else {
+                fetchAndRenderTmdbRow('/api/tmdb/trending/movie/day', 'trackMoviesTrending', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/movie/top_rated', 'trackMoviesTop', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=28', 'trackMoviesAction', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=878', 'trackMoviesScifi', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/movie/now_playing', 'trackMoviesCartelera', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=27', 'trackMoviesHorror', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=53', 'trackMoviesThriller', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=16', 'trackMoviesAnimation', 'movie');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/movie?with_genres=35', 'trackMoviesComedy', 'movie');
+            }
         }
 
         async function loadSeriesView(forceRefresh = false) {
             if (seriesLoaded && !forceRefresh) return;
             seriesLoaded = true;
 
-            fetchAndRenderTmdbRow('/api/tmdb/trending/tv/day', 'trackSeriesTrending', 'tv');
-            fetchAndRenderTmdbRow('/api/tmdb/tv/popular', 'trackSeriesPopular', 'tv');
-            fetchAndRenderTmdbRow('/api/tmdb/tv/top_rated', 'trackSeriesTop', 'tv');
-            fetchAndRenderTmdbRow('/api/tmdb/tv/on_the_air', 'trackSeriesOnAir', 'tv');
-            fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_genres=18', 'trackSeriesDrama', 'tv');
+            if (currentSpanishOnlyFilter) {
+                fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_original_language=es&sort_by=popularity.desc', 'trackSeriesTrending', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_original_language=es&sort_by=vote_count.desc', 'trackSeriesPopular', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_original_language=es&sort_by=vote_average.desc&vote_count.gte=30', 'trackSeriesTop', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_original_language=es&air_date.gte=2024-01-01&sort_by=popularity.desc', 'trackSeriesOnAir', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_original_language=es&with_genres=18&sort_by=popularity.desc', 'trackSeriesDrama', 'tv');
+            } else {
+                fetchAndRenderTmdbRow('/api/tmdb/trending/tv/day', 'trackSeriesTrending', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/tv/popular', 'trackSeriesPopular', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/tv/top_rated', 'trackSeriesTop', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/tv/on_the_air', 'trackSeriesOnAir', 'tv');
+                fetchAndRenderTmdbRow('/api/tmdb/discover/tv?with_genres=18', 'trackSeriesDrama', 'tv');
+            }
         }
 
         // ==========================================
@@ -14933,11 +15031,13 @@ async function loadSoberanoView(forceRefresh = false) {
     if (soberanoLoaded && !forceRefresh) return;
     soberanoLoaded = true;
 
-    // Fila 1: Torrents Top Tendencias Globales (Películas 4K HDR)
-    fetchAndRenderSoberanoRow('https://v3-cinemeta.strem.io/catalog/movie/top.json', 'trackSoberanoTopMovies', 'movie');
-
-    // Fila 2: Series y Anime en Tendencia
-    fetchAndRenderSoberanoRow('https://v3-cinemeta.strem.io/catalog/series/top.json', 'trackSoberanoTopSeries', 'tv');
+    if (currentSpanishOnlyFilter) {
+        fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/discover/movie?with_original_language=es&sort_by=popularity.desc`, 'trackSoberanoTopMovies', 'movie');
+        fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/discover/tv?with_original_language=es&sort_by=popularity.desc`, 'trackSoberanoTopSeries', 'tv');
+    } else {
+        fetchAndRenderSoberanoRow('https://v3-cinemeta.strem.io/catalog/movie/top.json', 'trackSoberanoTopMovies', 'movie');
+        fetchAndRenderSoberanoRow('https://v3-cinemeta.strem.io/catalog/series/top.json', 'trackSoberanoTopSeries', 'tv');
+    }
 }
 
 async function fetchAndRenderSoberanoRow(url, containerId, mediaType) {
@@ -14948,7 +15048,19 @@ async function fetchAndRenderSoberanoRow(url, containerId, mediaType) {
     try {
         const resp = await fetch(url);
         const data = await resp.json();
-        const metas = (data && Array.isArray(data.metas)) ? data.metas : [];
+        let metas = [];
+        if (data && Array.isArray(data.metas)) {
+            metas = data.metas;
+        } else if (data && Array.isArray(data.results)) {
+            metas = data.results.map(r => ({
+                id: String(r.id),
+                name: r.title || r.name,
+                title: r.title || r.name,
+                poster: r.poster_path ? (r.poster_path.startsWith('http') ? r.poster_path : `https://image.tmdb.org/t/p/w500${r.poster_path}`) : '',
+                releaseInfo: (r.release_date || r.first_air_date || '').substring(0, 4),
+                genres: r.genre_ids || []
+            }));
+        }
 
         if (metas.length === 0) {
             container.innerHTML = '<div style="color:var(--text-muted); padding:20px;">No hay títulos disponibles</div>';
@@ -15178,6 +15290,65 @@ function onSoberanoSeasonEpisodeChange() {
     loadSoberanoTorrentList(activeSoberanoItem.id, 'tv', s, e);
 }
 
+function renderSoberanoTorrentListFromCache() {
+    const listEl = document.getElementById('soberanoTorrentList');
+    const countBadge = document.getElementById('soberanoTorrentCountBadge');
+    if (!listEl) return;
+
+    let displayStreams = activeSoberanoStreams || [];
+    if (swarmSpanishOnly) {
+        displayStreams = displayStreams.filter(s => s.is_es || s.is_dual);
+    }
+
+    if (countBadge) {
+        countBadge.textContent = swarmSpanishOnly 
+            ? `${displayStreams.length} en español (de ${activeSoberanoStreams.length})` 
+            : `${displayStreams.length} torrents en vivo`;
+    }
+
+    if (displayStreams.length === 0) {
+        listEl.innerHTML = swarmSpanishOnly 
+            ? '<div style="color:var(--text-muted); padding:30px; text-align:center;">No se encontraron torrents con audio/subtítulo nativo en español. Desactiva el filtro para ver todo el enjambre.</div>'
+            : '<div style="color:var(--text-muted); padding:30px; text-align:center;">No se encontraron torrents activos para este contenido por el momento.</div>';
+        return;
+    }
+
+    let html = '';
+    displayStreams.forEach((stream) => {
+        const originalIndex = activeSoberanoStreams.indexOf(stream);
+        const isTopSeeds = originalIndex === 0 && stream.seeds > 10;
+        const seedBadgeClass = stream.seeds > 50 ? 'style="color:#30d158; font-weight:700;"' : (stream.seeds > 10 ? 'style="color:#0a84ff;"' : 'style="color:#ff9f0a;"');
+        const langIcon = stream.is_es ? '🇪🇸 Español' : (stream.is_dual ? '🌐 Dual Audio' : '🇺🇸 VO');
+        const qualityClass = stream.quality === '4K' ? 'style="background:rgba(217,70,239,0.25); color:#f0abfc; font-weight:800;"' : 'style="background:rgba(56,189,248,0.2); color:#38bdf8;"';
+
+        html += `
+            <div class="soberano-torrent-item" onclick="playSoberanoTorrent(${originalIndex})" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:12px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(217,70,239,0.12)'; this.style.borderColor='rgba(217,70,239,0.4)';" onmouseout="this.style.background='rgba(255,255,255,0.04)'; this.style.borderColor='rgba(255,255,255,0.08)';">
+                <div style="flex:1; margin-right:14px; min-width:0;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+                        <span class="meta-badge" ${qualityClass}>${stream.quality}</span>
+                        ${stream.is_hdr ? '<span class="meta-badge" style="background:rgba(255,159,10,0.2); color:#ff9f0a; font-weight:700;">HDR / DV</span>' : ''}
+                        <span class="meta-badge" style="background:rgba(255,255,255,0.08);">${langIcon}</span>
+                        <span class="meta-badge" ${seedBadgeClass}><i class="fa fa-users"></i> ${stream.seeds} seeds</span>
+                        ${stream.size ? `<span class="meta-badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);"><i class="fa fa-hdd"></i> ${stream.size}</span>` : ''}
+                        ${isTopSeeds ? '<span class="meta-badge" style="background:rgba(48,209,88,0.25); color:#30d158; font-weight:700;"><i class="fa fa-bolt"></i> Máxima Velocidad</span>' : ''}
+                    </div>
+                    <div style="font-size:13px; font-weight:600; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(stream.title || stream.filename)}">
+                        ${escapeHtml(stream.title || stream.filename)}
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                        ${escapeHtml(stream.tracker || 'P2P')} • ${stream.name || 'Torrentio'}
+                    </div>
+                </div>
+                <button class="btn-apple-primary" style="padding:8px 16px; font-size:13px; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; background:linear-gradient(135deg, #d946ef, #8b5cf6);">
+                    <i class="fa fa-play"></i> RAM Play
+                </button>
+            </div>
+        `;
+    });
+
+    listEl.innerHTML = html;
+}
+
 async function loadSoberanoTorrentList(id, type = 'movie', s = 1, e = 1) {
     const listEl = document.getElementById('soberanoTorrentList');
     const countBadge = document.getElementById('soberanoTorrentCountBadge');
@@ -15190,47 +15361,7 @@ async function loadSoberanoTorrentList(id, type = 'movie', s = 1, e = 1) {
         const data = await resp.json();
         const streams = (data && Array.isArray(data.streams)) ? data.streams : [];
         activeSoberanoStreams = streams;
-
-        if (countBadge) countBadge.textContent = `${streams.length} torrents en vivo`;
-
-        if (streams.length === 0) {
-            listEl.innerHTML = '<div style="color:var(--text-muted); padding:30px; text-align:center;">No se encontraron torrents activos para este contenido por el momento.</div>';
-            return;
-        }
-
-        let html = '';
-        streams.forEach((stream, idx) => {
-            const isTopSeeds = idx === 0 && stream.seeds > 10;
-            const seedBadgeClass = stream.seeds > 50 ? 'style="color:#30d158; font-weight:700;"' : (stream.seeds > 10 ? 'style="color:#0a84ff;"' : 'style="color:#ff9f0a;"');
-            const langIcon = stream.is_es ? '🇪🇸 Español' : (stream.is_dual ? '🌐 Dual Audio' : '🇺🇸 VO');
-            const qualityClass = stream.quality === '4K' ? 'style="background:rgba(217,70,239,0.25); color:#f0abfc; font-weight:800;"' : 'style="background:rgba(56,189,248,0.2); color:#38bdf8;"';
-
-            html += `
-                <div class="soberano-torrent-item" onclick="playSoberanoTorrent(${idx})" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:12px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(217,70,239,0.12)'; this.style.borderColor='rgba(217,70,239,0.4)';" onmouseout="this.style.background='rgba(255,255,255,0.04)'; this.style.borderColor='rgba(255,255,255,0.08)';">
-                    <div style="flex:1; margin-right:14px; min-width:0;">
-                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
-                            <span class="meta-badge" ${qualityClass}>${stream.quality}</span>
-                            ${stream.is_hdr ? '<span class="meta-badge" style="background:rgba(255,159,10,0.2); color:#ff9f0a; font-weight:700;">HDR / DV</span>' : ''}
-                            <span class="meta-badge" style="background:rgba(255,255,255,0.08);">${langIcon}</span>
-                            <span class="meta-badge" ${seedBadgeClass}><i class="fa fa-users"></i> ${stream.seeds} seeds</span>
-                            ${stream.size ? `<span class="meta-badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);"><i class="fa fa-hdd"></i> ${stream.size}</span>` : ''}
-                            ${isTopSeeds ? '<span class="meta-badge" style="background:rgba(48,209,88,0.25); color:#30d158; font-weight:700;"><i class="fa fa-bolt"></i> Máxima Velocidad</span>' : ''}
-                        </div>
-                        <div style="font-size:13px; font-weight:600; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(stream.title || stream.filename)}">
-                            ${escapeHtml(stream.title || stream.filename)}
-                        </div>
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                            ${escapeHtml(stream.tracker || 'P2P')} • ${stream.name || 'Torrentio'}
-                        </div>
-                    </div>
-                    <button class="btn-apple-primary" style="padding:8px 16px; font-size:13px; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; background:linear-gradient(135deg, #d946ef, #8b5cf6);">
-                        <i class="fa fa-play"></i> RAM Play
-                    </button>
-                </div>
-            `;
-        });
-
-        listEl.innerHTML = html;
+        renderSoberanoTorrentListFromCache();
     } catch (e) {
         listEl.innerHTML = `<div style="color:var(--text-muted); padding:30px; text-align:center;">Error consultando torrents: ${e.message}</div>`;
     }
