@@ -2322,26 +2322,138 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // AirPlay 2 Native HLS Subtitle Media Playlist (#EXT-X-MEDIA URI target)
+    // Helper para parsear VTT en cues para segmentación HLS (compatible con Node 8+)
+    function parseVttForHls(vttText) {
+        if (!vttText) return [];
+        var lines = vttText.replace(/\r/g, '').split('\n');
+        var cues = [];
+        var i = 0;
+        while (i < lines.length && lines[i].indexOf('-->') === -1) i++;
+        while (i < lines.length) {
+            if (lines[i].indexOf('-->') !== -1) {
+                var parts = lines[i].split('-->');
+                var startSec = parseVttSec(parts[0].trim());
+                var endSec = parseVttSec(parts[1].trim().split(' ')[0]);
+                var textLines = [];
+                i++;
+                while (i < lines.length && lines[i].trim() !== '' && lines[i].indexOf('-->') === -1) {
+                    textLines.push(lines[i]);
+                    i++;
+                }
+                cues.push({ start: startSec, end: endSec, text: textLines.join('\n') });
+            } else {
+                i++;
+            }
+        }
+        return cues;
+    }
+
+    function parseVttSec(t) {
+        if (!t) return 0;
+        var parts = t.split(':');
+        if (parts.length === 3) {
+            return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2].replace(',', '.'));
+        } else if (parts.length === 2) {
+            return parseFloat(parts[0]) * 60 + parseFloat(parts[1].replace(',', '.'));
+        }
+        return 0;
+    }
+
+    function formatVttTime(sec) {
+        var h = Math.floor(sec / 3600);
+        var m = Math.floor((sec % 3600) / 60);
+        var s = (sec % 60).toFixed(3);
+        var hh = (h < 10 ? '0' : '') + h;
+        var mm = (m < 10 ? '0' : '') + m;
+        var ss = (parseFloat(s) < 10 ? '0' : '') + s;
+        return hh + ':' + mm + ':' + ss;
+    }
+
+    // AirPlay 2 Native HLS Subtitle Media Playlist (RFC 8216 & Apple Authoring Spec)
     if (parsed.pathname === '/api/hls_sub_media.m3u8') {
         const subUrl = parsed.query.sub || `${hostBase}/subtitles/active_es.vtt`;
-        const mediaM3u8 = [
+        const segDur = 4.0;
+        let maxTime = 7200; // 2 horas por defecto
+        const subName = path.basename(url.parse(subUrl).pathname || 'active_es.vtt');
+        let localDiskPath = path.join(SUBTITLES_DIR, subName);
+        if (!fs.existsSync(localDiskPath)) {
+            localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+        }
+        if (fs.existsSync(localDiskPath)) {
+            try {
+                const content = fs.readFileSync(localDiskPath, 'utf8');
+                const cues = parseVttForHls(content);
+                if (cues.length > 0) {
+                    maxTime = Math.max(3600, cues[cues.length - 1].end + 30);
+                }
+            } catch (eSubRead) {}
+        }
+        const totalSegs = Math.ceil(maxTime / segDur);
+        const mediaLines = [
             '#EXTM3U',
-            '#EXT-X-VERSION:3',
-            '#EXT-X-TARGETDURATION:14400',
+            '#EXT-X-VERSION:4',
+            '#EXT-X-TARGETDURATION:4',
             '#EXT-X-MEDIA-SEQUENCE:0',
-            '#EXT-X-PLAYLIST-TYPE:VOD',
-            '#EXTINF:14400.000,',
-            subUrl,
-            '#EXT-X-ENDLIST',
-            ''
-        ].join('\n');
+            '#EXT-X-PLAYLIST-TYPE:VOD'
+        ];
+        for (let s = 0; s < totalSegs; s++) {
+            mediaLines.push('#EXTINF:4.000000,');
+            mediaLines.push(`${hostBase}/api/hls_sub_segment.vtt?sub=${encodeURIComponent(subUrl)}&seg=${s}`);
+        }
+        mediaLines.push('#EXT-X-ENDLIST');
+        mediaLines.push('');
+        const mediaM3u8 = mediaLines.join('\n');
         res.writeHead(200, {
             'Content-Type': 'application/vnd.apple.mpegurl',
-            'Cache-Control': 'no-store',
+            'Content-Length': Buffer.byteLength(mediaM3u8),
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
             'Access-Control-Allow-Origin': '*'
         });
         return res.end(mediaM3u8);
+    }
+
+    // AirPlay 2 Native HLS WebVTT Segment Delivery (Apple HLS Authoring Spec)
+    if (parsed.pathname === '/api/hls_sub_segment.vtt') {
+        const subUrl = parsed.query.sub || `${hostBase}/subtitles/active_es.vtt`;
+        const segIdx = parseInt(parsed.query.seg || '0', 10);
+        const segDur = 4.0;
+        const segStart = segIdx * segDur;
+        const segEnd = (segIdx + 1) * segDur;
+        
+        const subName = path.basename(url.parse(subUrl).pathname || 'active_es.vtt');
+        let localDiskPath = path.join(SUBTITLES_DIR, subName);
+        if (!fs.existsSync(localDiskPath)) {
+            localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+        }
+        let matchedCues = [];
+        if (fs.existsSync(localDiskPath)) {
+            try {
+                const content = fs.readFileSync(localDiskPath, 'utf8');
+                const cues = parseVttForHls(content);
+                matchedCues = cues.filter(c => c.end >= segStart && c.start < segEnd);
+            } catch (eCues) {}
+        }
+
+        const vttOut = [
+            'WEBVTT',
+            'X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:126000',
+            ''
+        ];
+        for (let c = 0; c < matchedCues.length; c++) {
+            const item = matchedCues[c];
+            vttOut.push((c + 1).toString());
+            vttOut.push(`${formatVttTime(item.start)} --> ${formatVttTime(item.end)}`);
+            vttOut.push(item.text);
+            vttOut.push('');
+        }
+        const vttBuf = Buffer.from(vttOut.join('\n'), 'utf8');
+        res.writeHead(200, {
+            'Content-Type': 'text/vtt; charset=utf-8',
+            'Content-Length': vttBuf.length,
+            'Cache-Control': 'public, max-age=3600',
+            'Access-Control-Allow-Origin': '*'
+        });
+        return res.end(vttBuf);
     }
 
     // AirPlay 2 Native HLS Master Playlist Injector (#EXT-X-MEDIA:TYPE=SUBTITLES)
@@ -2356,7 +2468,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const subMediaUri = `${hostBase}/api/hls_sub_media.m3u8?sub=${encodeURIComponent(subUrl)}`;
-        const mediaTag = `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,URI="${subMediaUri}"`;
+        const mediaTag = `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI="${subMediaUri}"`;
 
         // Si no es un manifiesto maestro externo (ej. Torrent HLS o Media Playlist directo), envolver en Master Playlist
         if (streamUrl.indexOf('/api/torrent/hls/') !== -1 || streamUrl.indexOf('/stream.m3u8') !== -1) {

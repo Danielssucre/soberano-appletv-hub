@@ -11551,6 +11551,10 @@
                 subOverlay.innerHTML = '';
                 return;
             }
+            if (video && video.webkitCurrentPlaybackTargetIsWireless) {
+                subOverlay.style.display = 'none';
+                return;
+            }
             const cur = video ? (video.currentTime || 0) : 0;
             const activeCue = currentSubCues.find(c => cur >= c.start && cur <= c.end);
             if (activeCue) {
@@ -11568,9 +11572,6 @@
 
         function syncAirPlayHlsSubtitleManifest(explicitSubUrl = null) {
             if (!video || !subtitlesEnabled) return;
-            // Solo recargar el manifiesto con subtítulos cuando AirPlay está REALMENTE activo;
-            // en reproducción local el overlay DOM ya muestra los subtítulos sin tocar el stream.
-            if (!video.webkitCurrentPlaybackTargetIsWireless) return;
             const isAppleWebKitHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
             if (!isAppleWebKitHls || !PROXY_BASE) return;
 
@@ -12193,7 +12194,12 @@
                 if ('preferredForwardBufferDuration' in video) {
                     video.preferredForwardBufferDuration = 4.0;
                 }
-                video.src = targetUrl;
+                let initialAnimeUrl = targetUrl;
+                if ((subtitlesEnabled || currentCustomSub) && (targetUrl.includes('.m3u8') || targetUrl.includes('/stream.m3u8'))) {
+                    const subHttpUrl = currentCustomSub || `${PROXY_BASE}/subtitles/active_es.vtt`;
+                    initialAnimeUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(targetUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
+                }
+                video.src = initialAnimeUrl;
 
                 const onMeta = () => {
                     video.removeEventListener('loadedmetadata', onMeta);
@@ -12240,7 +12246,12 @@
                     }
                 });
             } else {
-                video.src = targetUrl;
+                let initialAnimeUrl = targetUrl;
+                if ((subtitlesEnabled || currentCustomSub) && (targetUrl.includes('.m3u8') || targetUrl.includes('/stream.m3u8'))) {
+                    const subHttpUrl = currentCustomSub || `${PROXY_BASE}/subtitles/active_es.vtt`;
+                    initialAnimeUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(targetUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
+                }
+                video.src = initialAnimeUrl;
                 video.play().catch(() => executeDirectPlayback(serverIndex + 1, startTime));
             }
 
@@ -14414,7 +14425,12 @@
                     if ('preferredForwardBufferDuration' in video) {
                         video.preferredForwardBufferDuration = 4.0;
                     }
-                    video.src = tmdbDirectStreamUrl;
+                    let initialStreamUrl = tmdbDirectStreamUrl;
+                    if ((subtitlesEnabled || currentCustomSub) && (tmdbDirectStreamUrl.includes('.m3u8') || tmdbDirectStreamUrl.includes('/api/torrent/hls/'))) {
+                        const subHttpUrl = currentCustomSub || `${PROXY_BASE}/subtitles/active_es.vtt`;
+                        initialStreamUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(tmdbDirectStreamUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
+                    }
+                    video.src = initialStreamUrl;
                     video.play().catch(e => console.log('Native HLS play wait:', e));
                 } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                     hlsPlayer = new Hls({
@@ -14449,7 +14465,12 @@
                         }
                     });
                 } else {
-                    video.src = tmdbDirectStreamUrl;
+                    let initialStreamUrl = tmdbDirectStreamUrl;
+                    if ((subtitlesEnabled || currentCustomSub) && (tmdbDirectStreamUrl.includes('.m3u8') || tmdbDirectStreamUrl.includes('/api/torrent/hls/'))) {
+                        const subHttpUrl = currentCustomSub || `${PROXY_BASE}/subtitles/active_es.vtt`;
+                        initialStreamUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(tmdbDirectStreamUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
+                    }
+                    video.src = initialStreamUrl;
                     video.play().catch(e => console.log('Fallback direct play wait:', e));
                 }
             } else {
