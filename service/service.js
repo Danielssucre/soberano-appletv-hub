@@ -1476,7 +1476,7 @@ function getStreamDeduplicationKey(url) {
     }
 }
 
-function deduplicateAndRankStreams(candidates, origLang, sharedEsSub, sharedAllSubs) {
+function deduplicateAndRankStreams(candidates, origLang, sharedEsSub, sharedAllSubs, preferSpanish = false) {
     var isForeign = (origLang || 'en').toLowerCase() !== 'es';
     var seenUrls = new Set();
     var unique = [];
@@ -1503,10 +1503,21 @@ function deduplicateAndRankStreams(candidates, origLang, sharedEsSub, sharedAllS
         if (c.server && (c.server.indexOf('Cuevana3c') === 0 || c.server.indexOf('Gnula') === 0)) {
             score += 75;
         }
-        if (c.is_sub) {
-            score += 1000; // Preferencia universal solicitada: HD con subtítulos
-        } else if (c.audio_es) {
-            score += 900;  // Audio Español Latino / Castellano listo en la barra de servidores
+
+        if (preferSpanish) {
+            // FILTRO ESTRICTO EN ESPAÑOL ACTIVO:
+            // Dar máxima prioridad a servidores con audio doblado en Español (Latino/Castellano)
+            if (c.audio_es) {
+                score += 5000;
+            } else if (c.sub_es || c.is_sub) {
+                score += 1000; // Respaldo con subtítulos en español si no hay doblaje
+            }
+        } else {
+            if (c.is_sub) {
+                score += 1000; // HD con subtítulos
+            } else if (c.audio_es) {
+                score += 900;  // Audio Español Latino / Castellano
+            }
         }
 
         if (c.quality === '1080p' || c.quality === 'HD') {
@@ -1656,8 +1667,8 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
     }
 }
 
-async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '', forceRefresh = false, reqProto = 'http') {
-    const cacheKey = `${id}_${type}_${s}_${e}`;
+async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '127.0.0.1:9099', origLang = 'en', expectedTitle = '', expectedOrigTitle = '', forceRefresh = false, reqProto = 'http', preferSpanish = false) {
+    const cacheKey = `${id}_${type}_${s}_${e}_${preferSpanish ? 'es' : 'all'}`;
     const now = Date.now();
     const cached = TMDB_STREAM_CACHE.get(cacheKey);
     // TTL de 15 minutos (900000 ms) para garantizar tokens CDN frescos y detección rápida de nuevos episodios
@@ -1704,7 +1715,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
         const allCandidates = [].concat(triResults[0] || [], triResults[1] || [], framexCands);
         console.log(`[MULTI_CLUSTER_RESOLVER] Total candidatos brutos obtenidos: ${allCandidates.length}`);
 
-        const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang, sharedEsSub, sharedAllSubs);
+        const ranked = deduplicateAndRankStreams(allCandidates, resolvedOrigLang, sharedEsSub, sharedAllSubs, preferSpanish);
         console.log(`[MULTI_CLUSTER_RESOLVER] Candidatos únicos y clasificados: ${ranked.length}`);
 
         if (ranked.length > 0) {
@@ -2910,7 +2921,8 @@ const server = http.createServer(async (req, res) => {
             const origLang = parsed.query.orig_lang || 'en';
             const expectedTitle = parsed.query.title || '';
             const expectedOrigTitle = parsed.query.orig_title || '';
-            const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, expectedTitle, expectedOrigTitle, forceRefresh, reqProto);
+            const preferSpanish = parsed.query.spanish_only === '1' || parsed.query.spanish_only === 'true' || parsed.query.es === '1';
+            const streamData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, expectedTitle, expectedOrigTitle, forceRefresh, reqProto, preferSpanish);
             const jsonStr = JSON.stringify(streamData);
             res.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
