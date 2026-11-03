@@ -2012,16 +2012,27 @@ async function getSoberanoTorrentStreams(id, type = 'movie', s = 1, e = 1) {
         return SOBERANO_STREAMS_CACHE.get(cacheKey);
     }
 
-    // ENJAMBRE FEDERADO MULTI-CLUSTER DE TORRENTS ($0.00 USD)
-    // Agrega en paralelo:
-    // 1. Torrentio Global por defecto (YTS, EZTV, 1337x, RARBG, ThePirateBay, KickassTorrents, etc.)
-    // 2. Torrentio Especializado en Español y P2P Regional (Cinecalidad, MejorTorrent, Wolfmax4k, BestTorrents, Comando, etc.)
-    // 3. JackettIO P2P fallback
-    const spanishProviders = 'yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,rutor,rutracker,comando,bludv,micoleaodublado,torrent9,ilcorsaronero,mejortorrent,wolfmax4k,cinecalidad,besttorrents';
+    // ENJAMBRE FEDERADO MULTI-CLUSTER DE MÁXIMA CAPACIDAD ($0.00 USD)
+    // Desacopla y agrega en paralelo 7 clústeres especializados para romper el tope de 50 torrents
+    // por consulta y extraer hasta 150+ torrents únicos por contenido:
+    // 1. Global Default
+    // 2. Trackers Españoles Puros (Cinecalidad, MejorTorrent, Wolfmax4k, BestTorrents)
+    // 3. Top Trackers Internacionales (YTS, 1337x, ThePirateBay, RARBG)
+    // 4. TV & Series Trackers (EZTV, TorrentGalaxy, MagnetDL, KickassTorrents)
+    // 5. Clúster Europeo / Eslavo (Rutor, Rutracker, Torrent9, IlCorSaRoNeRo)
+    // 6. Clúster Latino / Portugués (Comando, BluDV, MicoLeaoDublado)
+    // 7. Clúster Anime & Fansubs (NyaaSi, TokyoTosho, AniDex, HorribleSubs)
+    // 8. JackettIO P2P Indexer
+    const mType = isTv ? 'series' : 'movie';
     const endpoints = [
-        `https://torrentio.strem.fun/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`,
-        `https://torrentio.strem.fun/providers=${spanishProviders}/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`,
-        `https://jackettio.elfhosted.com/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`
+        `https://torrentio.strem.fun/stream/${mType}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=cinecalidad,mejortorrent,wolfmax4k,besttorrents/stream/${mType}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=yts,1337x,thepiratebay,rarbg/stream/${mType}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=eztv,torrentgalaxy,magnetdl,kickasstorrents/stream/${mType}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=rutor,rutracker,torrent9,ilcorsaronero/stream/${mType}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=comando,bludv,micoleaodublado/stream/${mType}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=nyaasi,tokyotosho,anidex,horriblesubs/stream/${mType}/${streamId}.json`,
+        `https://jackettio.elfhosted.com/stream/${mType}/${streamId}.json`
     ];
 
     try {
