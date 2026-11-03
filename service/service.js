@@ -2074,6 +2074,8 @@ const server = http.createServer(async (req, res) => {
 
     if (parsed.pathname === '/api/soberano/play') {
         const id = parsed.query.id || parsed.query.imdb_id || '';
+        const infoHash = (parsed.query.hash || parsed.query.infoHash || '').toLowerCase().trim();
+        const fileIdx = parseInt(parsed.query.idx || parsed.query.fileIdx || -1, 10);
         const type = parsed.query.type || 'movie';
         const s = parseInt(parsed.query.s || parsed.query.season || 1, 10) || 1;
         const e = parseInt(parsed.query.e || parsed.query.episode || 1, 10) || 1;
@@ -2081,8 +2083,39 @@ const server = http.createServer(async (req, res) => {
         const isEs = parsed.query.is_es === '1' || parsed.query.is_es === 'true';
         const origLang = isEs ? 'es' : 'en';
 
+        // 1. Si tenemos infoHash, resolver el Torrent real en RAM vía Mac M3 Daemon (puerto 9097)
+        if (infoHash) {
+            try {
+                const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}`;
+                const daemonRes = await fetchJson(daemonUrl, {}, 12000);
+                if (daemonRes && daemonRes.status === 'ok') {
+                    const streamPath = daemonRes.stream_path;
+                    const directUrl = `${reqProto}://${reqHost}/api/torrent/stream?path=${encodeURIComponent(streamPath)}`;
+                    
+                    res.writeHead(200, {
+                        'Content-Type': 'application/json; charset=utf-8',
+                        'Cache-Control': 'no-store',
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    return res.end(JSON.stringify({
+                        status: 'ok',
+                        mode: 'torrent_p2p',
+                        direct_stream_url: directUrl,
+                        name: daemonRes.name,
+                        filename: daemonRes.filename,
+                        sizeBytes: daemonRes.sizeBytes,
+                        numPeers: daemonRes.numPeers,
+                        is_mkv: daemonRes.is_mkv,
+                        fallback_url: `${reqProto}://${reqHost}/api/resolve_tmdb?id=${id}&type=${type}&s=${s}&e=${e}&title=${encodeURIComponent(title)}`
+                    }));
+                }
+            } catch (eDaemon) {
+                console.warn('[SOBERANO_PLAY] Daemon P2P Mac no disponible o timeout:', eDaemon.message);
+            }
+        }
+
+        // 2. Si el daemon P2P no respondió o no hay hash, usar el Espejo Web Transmutado de Respaldo
         try {
-            // Transmutador Cuántico: enlaza la selección del torrent con el enjambre de streams HTTPS directos pre-buferizados en RAM
             const playData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, title, title, false, reqProto);
             res.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
@@ -2094,6 +2127,52 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             return res.end(JSON.stringify({ status: 'error', message: ePlay.message }));
         }
+    }
+
+    // Proxy para el flujo de streaming del Torrent en RAM desde el Mac M3
+    if (parsed.pathname === '/api/torrent/stream') {
+        const streamPath = parsed.query.path || '';
+        if (!streamPath) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            return res.end('Missing stream path');
+        }
+        const proxyHeaders = {};
+        if (req.headers.range) proxyHeaders['range'] = req.headers.range;
+        if (req.headers['accept-encoding']) proxyHeaders['accept-encoding'] = req.headers['accept-encoding'];
+
+        const reqOpts = {
+            hostname: ALIGNER_HOST,
+            port: 9097,
+            path: streamPath,
+            method: req.method,
+            headers: proxyHeaders
+        };
+
+        const preq = http.request(reqOpts, (pres) => {
+            const outHeaders = Object.assign({}, pres.headers, {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                'Access-Control-Allow-Headers': '*'
+            });
+            res.writeHead(pres.statusCode, outHeaders);
+            pres.pipe(res);
+        });
+
+        preq.on('error', (err) => {
+            console.warn('[TORRENT_PROXY] Error conectando con Mac torrent daemon:', err.message);
+            if (!res.headersSent) {
+                res.writeHead(502, { 'Content-Type': 'text/plain' });
+                res.end('Error conectando con el motor Torrent en RAM.');
+            }
+        });
+
+        req.on('close', () => {
+            try { preq.abort(); } catch (e) {}
+        });
+
+        if (req.method === 'POST') req.pipe(preq);
+        else preq.end();
+        return;
     }
 
     // Health & Silicon Telemetry

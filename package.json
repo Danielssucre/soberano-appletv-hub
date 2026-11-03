@@ -1,0 +1,25 @@
+{
+  "name": "soberano-appletv-hub",
+  "version": "1.0.0",
+  "description": "> **Autonomous, zero-cost, high-performance streaming and dynamic catalog platform engineered directly for Apple Silicon & LG Smart TV webOS.**",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Danielssucre/soberano-appletv-hub.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Danielssucre/soberano-appletv-hub/issues"
+  },
+  "homepage": "https://github.com/Danielssucre/soberano-appletv-hub#readme",
+  "dependencies": {
+    "memory-chunk-store": "^1.3.5",
+    "webtorrent": "^3.0.21"
+  }
+}
