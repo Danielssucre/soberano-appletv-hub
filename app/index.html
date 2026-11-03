@@ -11548,6 +11548,11 @@
         function renderActiveSubCueNow() {
             const subOverlay = document.getElementById('soberanoSubOverlay');
             if (!subOverlay) return;
+            if (isBurnedTorrent()) {
+                subOverlay.style.display = 'none';
+                subOverlay.innerHTML = '';
+                return;
+            }
             if (!subtitlesEnabled || !currentSubCues || currentSubCues.length === 0) {
                 subOverlay.style.display = 'none';
                 subOverlay.removeAttribute('data-active-text');
@@ -11786,6 +11791,7 @@
         }
 
         function onAutoSubPillClick() {
+            if (isSoberanoTorrentPlaying()) { reloadSoberanoVariant(!isBurnedTorrent(), 'toggle'); return; }
             if (!subtitlesEnabled) {
                 if (currentSubCues && currentSubCues.length > 0) {
                     subtitlesEnabled = true;
@@ -11808,6 +11814,7 @@
         }
 
         function toggleSubtitles() {
+            if (isSoberanoTorrentPlaying()) { reloadSoberanoVariant(!isBurnedTorrent(), 'toggle'); return; }
             if (!subtitlesEnabled) {
                 // El usuario presionó el botón para ACTIVAR subtítulos:
                 // Si aún no se han descargado, buscarlos y anclarlos automáticamente en español
@@ -14704,6 +14711,7 @@
             } catch(e){}
 
             showSubSyncToast(offsetStr);
+            if (isBurnedTorrent()) scheduleBurnedResync();
         }
 
         function adjustSubSync(delta) {
@@ -14731,6 +14739,54 @@
             const total = (availableSpanishSubs && availableSpanishSubs.length) ? availableSpanishSubs.length : 1;
             const nextIdx = (currentSpanishSubIndex + 1) % Math.max(1, total);
             await autoSearchAndAnchorSpanishSub(nextIdx);
+        }
+
+        function isBurnedTorrent() {
+            return !!(currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p' && currentTmdbPlaying.burned);
+        }
+        function isSoberanoTorrentPlaying() {
+            return !!(currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p');
+        }
+
+        // Recarga el HLS del torrent con (burn=1) o sin (burn=0) subtítulos quemados en el video.
+        // El texto va en los píxeles, por eso viaja por AirPlay hasta la TV (LG descarta las pistas de texto).
+        let __burnReloading = false;
+        async function reloadSoberanoVariant(burn, reason) {
+            if (!isSoberanoTorrentPlaying() || !currentTmdbPlaying.playQuery || __burnReloading) return;
+            __burnReloading = true;
+            const keepT = video ? (video.currentTime || 0) : 0;
+            try {
+                showToast(burn ? '💬 Incrustando subtítulos en el video…' : '💬 Quitando subtítulos del video…');
+                const url = `${currentTmdbPlaying.playQuery}&burn=${burn ? 1 : 0}&off=${currentSubSyncOffset || 0}`;
+                const resp = await fetch(url, { cache: 'no-store' });
+                const data = await resp.json();
+                if (!data || data.status !== 'ok' || !data.direct_stream_url) throw new Error((data && data.message) || 'sin respuesta');
+                currentTmdbPlaying.burned = !!data.burned;
+                subtitlesEnabled = !!data.burned;
+                updateSubButtonsUI(subtitlesEnabled ? 'on' : 'off');
+                renderActiveSubCueNow();
+                enforceSpanishTracks(video);
+                directServersQueue[0].url = data.direct_stream_url;
+                tmdbDirectStreamUrl = data.direct_stream_url;
+                video.src = data.direct_stream_url;
+                const onMeta = () => {
+                    video.removeEventListener('loadedmetadata', onMeta);
+                    if (keepT > 1) { try { video.currentTime = keepT; } catch (e) {} }
+                    video.play().catch(() => {});
+                };
+                video.addEventListener('loadedmetadata', onMeta);
+                video.play().catch(() => {});
+                if (burn && !data.burned) showToast('⚠️ No se encontró subtítulo en español para este torrent');
+            } catch (eRel) {
+                console.warn('[BURN] reload falló:', eRel);
+                showToast('⚠️ No se pudo cambiar los subtítulos: ' + (eRel.message || eRel));
+            }
+            __burnReloading = false;
+        }
+        let __burnResyncTimer = null;
+        function scheduleBurnedResync() {
+            clearTimeout(__burnResyncTimer);
+            __burnResyncTimer = setTimeout(() => reloadSoberanoVariant(true, 'sync'), 1500);
         }
 
         let __airplayRebindTimers = [];
@@ -14761,6 +14817,13 @@
                 if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
             }
             if (!videoEl || !videoEl.textTracks) return;
+            if (isBurnedTorrent()) {
+                // Subtítulos ya quemados en los píxeles: desactivar cualquier pista de texto para no duplicar.
+                for (let i = 0; i < videoEl.textTracks.length; i++) videoEl.textTracks[i].mode = 'disabled';
+                const ov = document.getElementById('soberanoSubOverlay');
+                if (ov) { ov.style.display = 'none'; ov.innerHTML = ''; }
+                return;
+            }
             const isAppleWebKit = !window.webOS && !navigator.userAgent.includes('Web0S') && videoEl.canPlayType('application/vnd.apple.mpegurl');
             const overlayEl = document.getElementById('soberanoSubOverlay');
 
@@ -15177,14 +15240,12 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     activeAnime = null;
     activeEpisode = null;
     const activeHash = (torrentData.infoHash || (stream && stream.infoHash) || "").toLowerCase();
-    const sameTorrentPrewarmed = !!(currentTmdbPlaying && currentTmdbPlaying.server === "torrent_p2p" && currentTmdbPlaying.hash === activeHash);
-    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0, hash: activeHash };
-    subtitlesEnabled = true;
-    if (!sameTorrentPrewarmed) {
-        currentCustomSub = null;
-        currentSubCues = [];
-    }
-    updateSubButtonsUI("on");
+    const prevQuery = (currentTmdbPlaying && currentTmdbPlaying.hash === activeHash) ? currentTmdbPlaying.playQuery : (torrentData.__playQuery || null);
+    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0, hash: activeHash, burned: !!torrentData.burned, playQuery: prevQuery || torrentData.__playQuery || null };
+    subtitlesEnabled = !!torrentData.burned;
+    currentCustomSub = null;
+    currentSubCues = [];
+    updateSubButtonsUI(subtitlesEnabled ? "on" : "off");
     const type = item.media_type || (season ? "tv" : "movie");
     const s = season || 1;
     const e = episode || 1;
@@ -15201,6 +15262,7 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
         hlsPlayer = null;
     }
     try { video.pause(); } catch(e) {}
+    Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
 
     const modal = document.getElementById("playerModal");
     const title = item.title || item.name || "Sin título";
@@ -15223,12 +15285,12 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     ];
 
     currentServerIndex = 0;
-    showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]`);
+    showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]${torrentData.burned ? ' • subtítulos incrustados' : ''}`);
     executeTmdbDirectPlayback(0, 0);
-    if (!currentSubCues || currentSubCues.length === 0) {
+    if (!torrentData.burned) {
+        // Sin subtítulo incrustado (no hallado / respaldo): flujo clásico por pista de texto
+        subtitlesEnabled = false;
         autoSearchAndAnchorSpanishSub(0);
-    } else {
-        enforceSpanishTracks(video);
     }
 }
 
@@ -15256,18 +15318,16 @@ async function playSoberanoTorrent(streamIdx) {
         media_type: type
     };
 
-    // Pre-armar el contexto y disparar la descarga de subtítulos en paralelo de inmediato
-    currentTmdbPlaying = { item: itemObj, season: s, episode: e, server: "torrent_p2p", torrentRetries: 0, hash: (stream.infoHash || "").toLowerCase() };
-    autoSearchAndAnchorSpanishSub(0);
-
     try {
         const isEsParam = (stream.is_es || stream.is_dual) ? '1' : '0';
-        const qUrl = `${PROXY_BASE}/api/soberano/play?hash=${encodeURIComponent(stream.infoHash || "")}&idx=${stream.fileIdx !== undefined ? stream.fileIdx : -1}&title=${encodeURIComponent(title)}&type=${type}&s=${s}&e=${e}&is_es=${isEsParam}&quality=${encodeURIComponent(stream.quality || "1080p")}&seeds=${stream.seeds || 0}`;
+        const baseQ = `${PROXY_BASE}/api/soberano/play?id=${encodeURIComponent(activeSoberanoItem.id || "")}&hash=${encodeURIComponent(stream.infoHash || "")}&idx=${stream.fileIdx !== undefined ? stream.fileIdx : -1}&title=${encodeURIComponent(title)}&type=${type}&s=${s}&e=${e}&is_es=${isEsParam}&quality=${encodeURIComponent(stream.quality || "1080p")}&seeds=${stream.seeds || 0}`;
+        const qUrl = `${baseQ}&burn=1&off=${currentSubSyncOffset || 0}`;
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 28000);
+        const timer = setTimeout(() => ctrl.abort(), 60000);
         const resp = await fetch(qUrl, { signal: ctrl.signal });
         clearTimeout(timer);
         const playData = await resp.json();
+        if (playData) playData.__playQuery = baseQ;
 
         if (playData && playData.status === "ok" && playData.direct_stream_url) {
             launchSoberanoTorrentPlayback(playData, itemObj, type === "tv" ? s : null, type === "tv" ? e : null, stream);

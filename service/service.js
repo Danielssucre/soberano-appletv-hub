@@ -65,6 +65,7 @@ function findIpadVaultHtml() {
 }
 
 const SUBTITLES_DIR = path.join(__dirname, 'subtitles');
+const BURNED_HASHES = {}; // infoHash -> true si el HLS del torrent lleva subtítulos quemados en el video
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -2125,11 +2126,36 @@ const server = http.createServer(async (req, res) => {
         // Resolver EXCLUSIVAMENTE el Torrent real en RAM + JIT HLS vía Mac M3 Daemon (puerto 9097)
         // PROHIBIDO hacer fallback al proveedor de películas/series (Cuevana/Framex)
         try {
-            const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}`;
-            const daemonRes = await fetchJson(daemonUrl, {}, 26000);
+            // BURN-IN: AirPlay hacia TV LG descarta las pistas de subtítulos (in-manifest y <track>) y solo
+            // transmite el video. La única forma universal es incrustar el texto en los píxeles del video
+            // (igual que los proveedores Cuevana), generado en el Mac M3 con overlay de ffmpeg.
+            const wantBurn = parsed.query.burn !== '0';
+            const subOff = parseFloat(parsed.query.off || '0') || 0;
+            let burnSubUrl = '';
+            if (wantBurn && !isEs) {
+                try {
+                    const subRes = await Promise.race([
+                        resolveAutoSpanishSubtitle({ id: id, type: type, s: s, e: e, title: title, hash: infoHash }, reqHost, reqProto),
+                        new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 12000); })
+                    ]);
+                    const hashVttPath = path.join(SUBTITLES_DIR, infoHash + '_es.vtt');
+                    if (subRes && subRes.status === 'ok' && fs.existsSync(hashVttPath)) {
+                        let tvIp = (req.socket && req.socket.localAddress || '').replace(/^::ffff:/, '');
+                        if (!tvIp || tvIp === '127.0.0.1' || tvIp === '::1') tvIp = '192.168.128.8';
+                        burnSubUrl = `http://${tvIp}:9099/subtitles/${infoHash}_es.vtt`;
+                    }
+                } catch (eBurnSub) {
+                    console.warn('[SOBERANO_PLAY] Subtítulo para burn-in no disponible:', eBurnSub.message);
+                }
+            }
+
+            const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}` +
+                (burnSubUrl ? `&sub=${encodeURIComponent(burnSubUrl)}&off=${subOff}` : '');
+            const daemonRes = await fetchJson(daemonUrl, {}, 45000);
             if (daemonRes && daemonRes.status === 'ok') {
                 const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
                 const directHlsUrl = `${reqProto}://${reqHost}/api/torrent/hls/${cleanHash}/index.m3u8`;
+                if (daemonRes.burned) BURNED_HASHES[cleanHash] = true; else delete BURNED_HASHES[cleanHash];
 
                 res.writeHead(200, {
                     'Content-Type': 'application/json; charset=utf-8',
@@ -2148,6 +2174,7 @@ const server = http.createServer(async (req, res) => {
                     videoCodec: daemonRes.videoCodec,
                     audioLang: daemonRes.audioLang,
                     hls_ready: daemonRes.hls_ready,
+                    burned: !!daemonRes.burned,
                     is_mkv: daemonRes.is_mkv
                 }));
             }
@@ -2178,7 +2205,15 @@ const server = http.createServer(async (req, res) => {
             // Garantiza que AirPlay 2 y el receptor del televisor LG carguen video y subtítulos
             // de forma nativa e inseparable sin recurrir a sideloading DOM en el móvil.
             if (relFile === 'index.m3u8') {
-                const masterLines = [
+                const burnedMaster = !!BURNED_HASHES[infoHash];
+                const masterLines = burnedMaster ? [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:6',
+                    '#EXT-X-INDEPENDENT-SEGMENTS',
+                    '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+                    'video.m3u8',
+                    ''
+                ].join('\n') : [
                     '#EXTM3U',
                     '#EXT-X-VERSION:6',
                     '#EXT-X-INDEPENDENT-SEGMENTS',
@@ -2308,7 +2343,8 @@ const server = http.createServer(async (req, res) => {
                 const outHeaders = Object.assign({}, pres.headers, {
                     'Access-Control-Allow-Origin': '*',
                     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-                    'Access-Control-Allow-Headers': '*'
+                    'Access-Control-Allow-Headers': '*',
+                    'Cache-Control': 'no-store'
                 });
                 res.writeHead(pres.statusCode, outHeaders);
                 pres.pipe(res);
