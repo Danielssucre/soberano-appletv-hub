@@ -1953,14 +1953,18 @@ async function searchSoberanoCatalog(query) {
     }
 
     const enc = encodeURIComponent(qTrim);
-    // Búsqueda cruzada en Cinemeta (Películas, Series y Anime)
+    // Búsqueda Híbrida Inteligente: Cinemeta + TMDB Multi-Search con resolución de IMDb IDs
     const endpoints = [
         `https://v3-cinemeta.strem.io/catalog/movie/top/search=${enc}.json`,
         `https://v3-cinemeta.strem.io/catalog/series/top/search=${enc}.json`
     ];
 
     try {
-        const results = await safeAll(endpoints.map(u => fetchJson(u, {}, 5000)));
+        const [metaResults, tmdbRaw] = await Promise.all([
+            safeAll(endpoints.map(u => fetchJson(u, {}, 5000))),
+            proxyTmdbRequest('search/multi', `query=${enc}&language=es-MX`).then(r => JSON.parse(r.body)).catch(() => null)
+        ]);
+        const results = metaResults;
         const combined = [];
         const seenIds = new Set();
 
@@ -1983,6 +1987,60 @@ async function searchSoberanoCatalog(query) {
                     }
                 });
             }
+        });
+
+        // Inyectar resultados de alta relevancia de TMDB (especialmente series de televisión)
+        if (tmdbRaw && Array.isArray(tmdbRaw.results)) {
+            const tmdbItems = tmdbRaw.results.filter(it => (it.media_type === 'movie' || it.media_type === 'tv') && (it.poster_path || it.backdrop_path)).slice(0, 10);
+            for (const tItem of tmdbItems) {
+                const isTv = tItem.media_type === 'tv';
+                let imdbId = null;
+                try {
+                    const extRes = await proxyTmdbRequest(`${isTv ? 'tv' : 'movie'}/${tItem.id}/external_ids`, '');
+                    const extData = JSON.parse(extRes.body);
+                    if (extData && extData.imdb_id) imdbId = extData.imdb_id;
+                } catch(eExt) {}
+
+                const canonicalId = imdbId || String(tItem.id);
+                if (!seenIds.has(canonicalId)) {
+                    seenIds.add(canonicalId);
+                    combined.push({
+                        id: canonicalId,
+                        imdb_id: imdbId || canonicalId,
+                        type: isTv ? 'tv' : 'movie',
+                        title: tItem.title || tItem.name || '',
+                        poster: tItem.poster_path ? (tItem.poster_path.startsWith('http') ? tItem.poster_path : `https://image.tmdb.org/t/p/w500${tItem.poster_path}`) : '',
+                        backdrop: tItem.backdrop_path ? `https://image.tmdb.org/t/p/w1280${tItem.backdrop_path}` : '',
+                        year: (tItem.release_date || tItem.first_air_date || '').substring(0, 4),
+                        description: tItem.overview || '',
+                        genres: tItem.genre_ids || [],
+                        popularity: tItem.popularity || 0
+                    });
+                }
+            }
+        }
+
+        // Ordenar con relevancia exacta: coincidencias exactas o de prefijo primero
+        const qNorm = qTrim.toLowerCase();
+        combined.sort((a, b) => {
+            const aTitle = (a.title || '').toLowerCase();
+            const bTitle = (b.title || '').toLowerCase();
+            const aExact = aTitle === qNorm;
+            const bExact = bTitle === qNorm;
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+
+            const aStarts = aTitle.startsWith(qNorm);
+            const bStarts = bTitle.startsWith(qNorm);
+            if (aStarts && !bStarts) return -1;
+            if (!aStarts && bStarts) return 1;
+
+            // Preferir series sobre documentales o películas secundarias si coinciden
+            const aSeries = a.type === 'tv';
+            const bSeries = b.type === 'tv';
+            if (aSeries !== bSeries) return aSeries ? -1 : 1;
+
+            return (b.popularity || 0) - (a.popularity || 0);
         });
 
         SOBERANO_CACHE.set(cacheKey, combined);
