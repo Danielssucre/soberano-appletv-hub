@@ -10596,8 +10596,13 @@
                 if (isWireless) {
                     showToast('📺 Transmitiendo en pantalla con AirPlay');
                     btn.classList.add('airplay-active');
+                    enforceSpanishTracks(vid);
+                    if (subtitlesEnabled) {
+                        syncAirPlayHlsSubtitleManifest();
+                    }
                 } else {
                     btn.classList.remove('airplay-active');
+                    enforceSpanishTracks(vid);
                 }
             });
 
@@ -11559,7 +11564,46 @@
             }
         }
 
-        function attachNativeSpanishTrack(vttText) {
+        let lastRawBaseHlsUrl = null;
+
+        function syncAirPlayHlsSubtitleManifest(explicitSubUrl = null) {
+            if (!video || !subtitlesEnabled) return;
+            const isAppleWebKitHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
+            if (!isAppleWebKitHls || !PROXY_BASE) return;
+
+            const currentSrc = video.currentSrc || video.src || tmdbDirectStreamUrl || '';
+            if (!currentSrc || (!currentSrc.includes('.m3u8') && !currentSrc.includes('/api/torrent/hls/'))) return;
+
+            if (!currentSrc.includes('/api/hls_sub_master.m3u8')) {
+                lastRawBaseHlsUrl = currentSrc;
+            }
+            const baseStreamUrl = lastRawBaseHlsUrl || tmdbDirectStreamUrl || currentSrc;
+            if (!baseStreamUrl || baseStreamUrl.includes('/api/hls_sub_master.m3u8')) return;
+
+            const subHttpUrl = explicitSubUrl || currentCustomSub || `${window.location.origin}/subtitles/active_es.vtt`;
+            const targetMasterUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(baseStreamUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
+
+            if (video.src === targetMasterUrl) {
+                enforceSpanishTracks(video);
+                return;
+            }
+
+            const savedTime = video.currentTime || 0;
+            console.log('[AIRPLAY SUBS] Inyectando manifiesto maestro HLS con #EXT-X-MEDIA:TYPE=SUBTITLES:', targetMasterUrl);
+            video.src = targetMasterUrl;
+            const onRestoreMeta = () => {
+                video.removeEventListener('loadedmetadata', onRestoreMeta);
+                if (savedTime > 0.5) {
+                    try { video.currentTime = savedTime; } catch (e) {}
+                }
+                enforceSpanishTracks(video);
+                video.play().catch(() => {});
+            };
+            video.addEventListener('loadedmetadata', onRestoreMeta);
+            video.play().catch(() => {});
+        }
+
+        function attachNativeSpanishTrack(vttText, serverVttUrl = null) {
             if (!video || !vttText) return;
             try {
                 Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
@@ -11567,22 +11611,25 @@
                     try { URL.revokeObjectURL(currentSubBlobUrl); } catch(e) {}
                     currentSubBlobUrl = null;
                 }
-                const blob = new Blob([vttText], { type: 'text/vtt;charset=utf-8' });
-                currentSubBlobUrl = URL.createObjectURL(blob);
+                // Usar SIEMPRE una URL HTTP/HTTPS real del servidor (jamás blob://) para que
+                // el receptor remoto AirPlay 2 (TV / Apple TV) pueda descargar la pista WebVTT por red.
+                const resolvedHttpUrl = serverVttUrl || currentCustomSub || `${PROXY_BASE || window.location.origin}/subtitles/active_es.vtt?t=${Date.now()}`;
+                currentCustomSub = resolvedHttpUrl;
+
                 const tr = document.createElement('track');
                 tr.id = 'soberanoNativeEsTrack';
                 tr.kind = 'subtitles';
                 tr.srclang = 'es';
                 tr.label = 'Español';
-                tr.src = currentSubBlobUrl;
-                // Prevenir que el navegador active el track automáticamente al adjuntarlo
+                tr.default = true;
+                tr.src = resolvedHttpUrl;
                 video.appendChild(tr);
-                // Desactivar síncronamente y asíncronamente para evitar que WebKit renderice subtítulos dobles
-                if (tr.track) tr.track.mode = 'disabled';
+
+                enforceSpanishTracks(video);
                 setTimeout(() => {
-                    if (tr.track) tr.track.mode = 'disabled';
                     enforceSpanishTracks(video);
-                }, 0);
+                    syncAirPlayHlsSubtitleManifest(resolvedHttpUrl);
+                }, 50);
             } catch(e) {}
         }
 
@@ -11643,7 +11690,7 @@
                                 currentSpanishSubIndex = typeof data.selected_index === 'number' ? data.selected_index : 0;
                                 currentCustomSub = data.vtt_url || null;
                                 subtitlesEnabled = true;
-                                attachNativeSpanishTrack(data.vtt_content);
+                                attachNativeSpanishTrack(data.vtt_content, data.vtt_url);
                                 updateSubButtonsUI('on');
                                 renderActiveSubCueNow();
                                 showToast(`✅ Subtítulo Español anclado: ${data.label || 'Español'} (${parsed.length} líneas)`);
@@ -11692,7 +11739,7 @@
                                 });
                             }
                             subtitlesEnabled = true;
-                            attachNativeSpanishTrack(vttText);
+                            attachNativeSpanishTrack(vttText, targetSubUrl);
                             updateSubButtonsUI('on');
                             renderActiveSubCueNow();
                             showToast(`✅ Subtítulo Español anclado (${parsed.length} líneas)`);
@@ -11721,6 +11768,8 @@
                     subtitlesEnabled = true;
                     updateSubButtonsUI('on');
                     renderActiveSubCueNow();
+                    if (video) enforceSpanishTracks(video);
+                    syncAirPlayHlsSubtitleManifest();
                     showToast(`✅ Subtítulo en español anclado (${currentSubCues.length} líneas)`);
                 } else {
                     autoSearchAndAnchorSpanishSub(0);
@@ -11747,6 +11796,7 @@
                 updateSubButtonsUI('on');
                 renderActiveSubCueNow();
                 if (video && video.textTracks) enforceSpanishTracks(video);
+                syncAirPlayHlsSubtitleManifest();
                 showToast(`✅ Subtítulos en español anclados (${currentSubCues.length} líneas)`);
             } else {
                 // El usuario presionó el botón para DESACTIVAR subtítulos
@@ -14300,6 +14350,7 @@
                 } catch(e) {}
             }
             tmdbDirectStreamUrl = currentSrv.url;
+            lastRawBaseHlsUrl = currentSrv.url;
             serverMode = 'native';
 
             const cleanName = (currentSrv.name || 'Stream Nativo')
@@ -14640,22 +14691,25 @@
         }
 
         function enforceSpanishTracks(videoEl) {
-            // SOBERANO ANTI-DUPLICATION SHIELD:
-            // En pantalla inline todos los subtítulos se pintan ÚNICAMENTE en la capa DOM 'soberanoSubOverlay'.
-            // Jamás permitir que el navegador (WebKit/Blink/Hls.js) pinte subtítulos nativos en modo inline.
-            // Solo en pantalla completa nativa de iOS (webkitDisplayingFullscreen) se activa el track nativo.
+            // SOBERANO ANTI-DUPLICATION SHIELD + AIRPLAY 2 SUBTITLE BRIDGE:
+            // En pantalla inline local todos los subtítulos se pintan en la capa DOM 'soberanoSubOverlay'.
+            // En pantalla completa nativa de iOS (webkitDisplayingFullscreen) O durante transmisión
+            // inalámbrica AirPlay (webkitCurrentPlaybackTargetIsWireless), se activa tr.mode = 'showing'
+            // para que el receptor AirPlay (TV / Apple TV) y el reproductor nativo muestren los subtítulos.
             if (hlsPlayer) {
                 hlsPlayer.subtitleDisplay = false;
                 if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
             }
             if (!videoEl || !videoEl.textTracks) return;
             const isIosFullscreen = !!(videoEl.webkitDisplayingFullscreen || document.fullscreenElement === videoEl);
+            const isWirelessAirPlay = !!videoEl.webkitCurrentPlaybackTargetIsWireless;
+            const shouldShowNativeTrack = (isIosFullscreen || isWirelessAirPlay) && subtitlesEnabled;
             const overlayEl = document.getElementById('soberanoSubOverlay');
             for (let i = 0; i < videoEl.textTracks.length; i++) {
                 const tr = videoEl.textTracks[i];
-                if (isIosFullscreen && subtitlesEnabled && (tr.language === 'es' || tr.label === 'Español' || tr.id === 'soberanoNativeEsTrack')) {
+                if (shouldShowNativeTrack && (tr.language === 'es' || tr.label === 'Español' || tr.id === 'soberanoNativeEsTrack')) {
                     tr.mode = 'showing';
-                    if (overlayEl) overlayEl.style.display = 'none';
+                    if (isIosFullscreen && overlayEl) overlayEl.style.display = 'none';
                 } else {
                     tr.mode = 'disabled';
                 }
@@ -14665,6 +14719,7 @@
             video.addEventListener('loadedmetadata', () => enforceSpanishTracks(video));
             video.addEventListener('webkitbeginfullscreen', () => enforceSpanishTracks(video));
             video.addEventListener('webkitendfullscreen', () => enforceSpanishTracks(video));
+            video.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => enforceSpanishTracks(video));
             if (video.textTracks) {
                 video.textTracks.addEventListener('addtrack', () => enforceSpanishTracks(video));
             }

@@ -933,6 +933,22 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                 cachedEntry.verifiedVttByUrl.set(cand.raw_url, vttContent);
             }
 
+            // Persistir el subtítulo validado como archivo .vtt estático en el mismo origen con X-TIMESTAMP-MAP
+            // para que receptores AirPlay 2 (TV / Apple TV) puedan descargarlo directamente sin blob://
+            const safeKey = String(cacheKey || 'sub').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+            const staticFileName = `auto_es_${safeKey}_${idx}.vtt`;
+            let hlsReadyVtt = String(vttContent || '').replace(/^\uFEFF/, '');
+            if (!hlsReadyVtt.includes('X-TIMESTAMP-MAP')) {
+                hlsReadyVtt = hlsReadyVtt.replace(/^WEBVTT[^\n]*\n/, 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n');
+            }
+            try {
+                if (!fs.existsSync(SUBTITLES_DIR)) fs.mkdirSync(SUBTITLES_DIR);
+                fs.writeFileSync(path.join(SUBTITLES_DIR, staticFileName), hlsReadyVtt, 'utf8');
+                fs.writeFileSync(path.join(SUBTITLES_DIR, 'active_es.vtt'), hlsReadyVtt, 'utf8');
+            } catch (eWriteSub) {}
+
+            const staticVttUrl = `${reqProto}://${reqHost}/subtitles/${staticFileName}`;
+
             const tracksOut = pool.map((t, i) => ({
                 index: i,
                 label: t.label,
@@ -947,8 +963,8 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                 selected_index: idx,
                 total_tracks: pool.length,
                 label: cand.label,
-                vtt_url: cand.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`),
-                vtt_content: vttContent,
+                vtt_url: staticVttUrl,
+                vtt_content: hlsReadyVtt,
                 tracks: tracksOut
             };
         } catch(eCand) {
@@ -961,8 +977,19 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
         try {
             const fb = cachedEntry.enFallbackCandidates[0];
             const rawEn = await fetchText(fb.raw_url, {}, 5000);
-            const vttTrans = await translateRawSubToSpanishVtt(rawEn);
+            let vttTrans = await translateRawSubToSpanishVtt(rawEn);
             if (verifySpanishLinguisticText(vttTrans)) {
+                if (!vttTrans.includes('X-TIMESTAMP-MAP')) {
+                    vttTrans = vttTrans.replace(/^WEBVTT[^\n]*\n/, 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n');
+                }
+                const safeKey = String(cacheKey || 'sub').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+                const staticFileName = `auto_es_${safeKey}_fb.vtt`;
+                try {
+                    if (!fs.existsSync(SUBTITLES_DIR)) fs.mkdirSync(SUBTITLES_DIR);
+                    fs.writeFileSync(path.join(SUBTITLES_DIR, staticFileName), vttTrans, 'utf8');
+                    fs.writeFileSync(path.join(SUBTITLES_DIR, 'active_es.vtt'), vttTrans, 'utf8');
+                } catch (eW) {}
+                const staticVttUrl = `${reqProto}://${reqHost}/subtitles/${staticFileName}`;
                 return {
                     status: 'ok',
                     tmdb_id: tmdbId,
@@ -970,9 +997,9 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                     selected_index: 0,
                     total_tracks: 1,
                     label: fb.label,
-                    vtt_url: fb.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`),
+                    vtt_url: staticVttUrl,
                     vtt_content: vttTrans,
-                    tracks: [{ index: 0, label: fb.label, url: fb.url.replace(/^https?:\/\/[^/]+\//, `${reqProto}://${reqHost}/`) }]
+                    tracks: [{ index: 0, label: fb.label, url: staticVttUrl }]
                 };
             }
         } catch(eFb) {}
@@ -2272,21 +2299,127 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // WebVTT Subtitles
-    if (parsed.pathname.startsWith('/subtitles/')) {
+    // WebVTT Subtitles (CORS-enabled + HLS X-TIMESTAMP-MAP for AirPlay 2)
+    if (parsed.pathname.indexOf('/subtitles/') === 0) {
         const subName = path.basename(parsed.pathname);
         const subPath = path.join(SUBTITLES_DIR, subName);
         if (fs.existsSync(subPath)) {
-            const vtt = fs.readFileSync(subPath);
+            let vtt = fs.readFileSync(subPath, 'utf8');
+            if (!vtt.includes('X-TIMESTAMP-MAP')) {
+                vtt = vtt.replace(/^WEBVTT[^\n]*\n/, 'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n');
+            }
+            const buf = Buffer.from(vtt, 'utf8');
             res.writeHead(200, {
                 'Content-Type': 'text/vtt; charset=utf-8',
-                'Content-Length': Buffer.byteLength(vtt)
+                'Content-Length': buf.length,
+                'Cache-Control': 'no-store',
+                'Access-Control-Allow-Origin': '*'
             });
-            return res.end(vtt);
+            return res.end(buf);
         } else {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.writeHead(404, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
             return res.end('Subtitle not found');
         }
+    }
+
+    // AirPlay 2 Native HLS Subtitle Media Playlist (#EXT-X-MEDIA URI target)
+    if (parsed.pathname === '/api/hls_sub_media.m3u8') {
+        const subUrl = parsed.query.sub || `${hostBase}/subtitles/active_es.vtt`;
+        const mediaM3u8 = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            '#EXT-X-TARGETDURATION:14400',
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+            '#EXTINF:14400.000,',
+            subUrl,
+            '#EXT-X-ENDLIST',
+            ''
+        ].join('\n');
+        res.writeHead(200, {
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-store',
+            'Access-Control-Allow-Origin': '*'
+        });
+        return res.end(mediaM3u8);
+    }
+
+    // AirPlay 2 Native HLS Master Playlist Injector (#EXT-X-MEDIA:TYPE=SUBTITLES)
+    // Garantiza que al enviar por AirPlay desde iPhone/iPad a Smart TV / Apple TV,
+    // el receptor AirPlay 2 cargue y muestre los subtítulos en español directamente desde el manifiesto HLS.
+    if (parsed.pathname === '/api/hls_sub_master.m3u8') {
+        const streamUrl = parsed.query.stream || '';
+        const subUrl = parsed.query.sub || `${hostBase}/subtitles/active_es.vtt`;
+        if (!streamUrl) {
+            res.writeHead(400, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
+            return res.end('Missing stream parameter');
+        }
+
+        const subMediaUri = `${hostBase}/api/hls_sub_media.m3u8?sub=${encodeURIComponent(subUrl)}`;
+        const mediaTag = `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,URI="${subMediaUri}"`;
+
+        // Si no es un manifiesto maestro externo (ej. Torrent HLS o Media Playlist directo), envolver en Master Playlist
+        if (streamUrl.indexOf('/api/torrent/hls/') !== -1 || streamUrl.indexOf('/stream.m3u8') !== -1) {
+            const masterM3u8 = [
+                '#EXTM3U',
+                '#EXT-X-VERSION:4',
+                '#EXT-X-INDEPENDENT-SEGMENTS',
+                mediaTag,
+                '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",SUBTITLES="subs"',
+                streamUrl,
+                ''
+            ].join('\n');
+            res.writeHead(200, {
+                'Content-Type': 'application/vnd.apple.mpegurl',
+                'Cache-Control': 'no-store',
+                'Access-Control-Allow-Origin': '*'
+            });
+            return res.end(masterM3u8);
+        }
+
+        try {
+            const upstreamText = await fetchText(streamUrl, {}, 4500);
+            if (upstreamText && upstreamText.indexOf('#EXT-X-STREAM-INF') !== -1) {
+                const parsedUp = url.parse(streamUrl);
+                const baseUp = `${parsedUp.protocol}//${parsedUp.host}${path.dirname(parsedUp.pathname)}/`;
+                const lines = upstreamText.replace(/\r/g, '').split('\n');
+                const outLines = ['#EXTM3U', '#EXT-X-VERSION:4', mediaTag];
+                for (let i = 0; i < lines.length; i++) {
+                    const ln = lines[i].trim();
+                    if (!ln || ln === '#EXTM3U' || ln.indexOf('#EXT-X-VERSION') === 0 || ln.indexOf('#EXT-X-MEDIA:TYPE=SUBTITLES') === 0) continue;
+                    if (ln.indexOf('#EXT-X-STREAM-INF:') === 0) {
+                        const cleanedInf = ln.replace(/,?\s*SUBTITLES="[^"]*"/g, '');
+                        outLines.push(`${cleanedInf},SUBTITLES="subs"`);
+                    } else if (ln.indexOf('#') === 0) {
+                        outLines.push(ln);
+                    } else {
+                        const absVariant = (ln.indexOf('http://') === 0 || ln.indexOf('https://') === 0) ? ln : url.resolve(baseUp, ln);
+                        outLines.push(absVariant);
+                    }
+                }
+                res.writeHead(200, {
+                    'Content-Type': 'application/vnd.apple.mpegurl',
+                    'Cache-Control': 'no-store',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                return res.end(outLines.join('\n') + '\n');
+            }
+        } catch (eUp) {}
+
+        const fallbackMaster = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:4',
+            mediaTag,
+            '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",SUBTITLES="subs"',
+            streamUrl,
+            ''
+        ].join('\n');
+        res.writeHead(200, {
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-store',
+            'Access-Control-Allow-Origin': '*'
+        });
+        return res.end(fallbackMaster);
     }
 
     // 1. Trending / Popular Row
