@@ -14238,7 +14238,27 @@
                 return;
             }
 
+            const isSoberanoTorrent = (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p');
+
             if (serverIndex >= directServersQueue.length) {
+                // REGLA INMUTABLE SOBERANO: Si estamos reproduciendo un Torrent P2P en RAM,
+                // JAMÁS conmutar al proveedor de películas/series (Cuevana/Framex).
+                // Reintentar el propio flujo HLS del Torrent mientras termina de llenar el primer segmento.
+                if (isSoberanoTorrent) {
+                    currentTmdbPlaying.torrentRetries = (currentTmdbPlaying.torrentRetries || 0) + 1;
+                    if (currentTmdbPlaying.torrentRetries <= 4) {
+                        showToast(`⏳ Llenando búfer P2P en RAM (intento ${currentTmdbPlaying.torrentRetries}/4)...`);
+                        setTimeout(() => {
+                            if (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p') {
+                                executeTmdbDirectPlayback(0, startTime);
+                            }
+                        }, 2500);
+                    } else {
+                        showToast('⚠️ El torrent seleccionado tiene pocos seeds activos. Elige otro torrent de la lista.');
+                    }
+                    return;
+                }
+
                 if (PROXY_BASE && currentTmdbPlaying && !currentTmdbPlaying.retriedFresh) {
                     currentTmdbPlaying.retriedFresh = true;
                     const cItem = currentTmdbPlaying.item || {};
@@ -14268,7 +14288,7 @@
 
             currentServerIndex = serverIndex;
             const currentSrv = directServersQueue[serverIndex];
-            if (currentSrv.is_fallback_api) {
+            if (currentSrv.is_fallback_api && !isSoberanoTorrent) {
                 try {
                     showToast("🌐 Conectando Espejo Web Alternativo...");
                     const fResp = await fetch(currentSrv.url);
@@ -14317,6 +14337,9 @@
                 video._currentOnLoadedMeta = null;
                 clearTimeout(playbackWatchdog);
                 if (startTime > 0) video.currentTime = startTime;
+                else if (isSoberanoTorrent) {
+                    try { video.currentTime = 0; } catch (e) {}
+                }
                 video.play().catch(e => console.log('TMDB play wait:', e));
             };
             video._currentOnLoadedMeta = onLoadedMeta;
@@ -14341,6 +14364,7 @@
                     video.play().catch(e => console.log('Native HLS play wait:', e));
                 } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                     hlsPlayer = new Hls({
+                        startPosition: startTime > 0 ? startTime : 0,
                         maxBufferLength: 90,
                         maxMaxBufferLength: 240,
                         maxBufferSize: 60 * 1024 * 1024,
@@ -14379,12 +14403,14 @@
                 video.play().catch(e => console.log('MP4 play wait:', e));
             }
 
-            playbackWatchdog = setTimeout(() => {
-                if (video.readyState === 0 && serverMode === 'native' && directServersQueue.length > (serverIndex + 1)) {
-                    console.warn(`[TMDB PLAYER] Watchdog 7.5s activado para [${cleanName}], pasando al siguiente servidor...`);
-                    executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
-                }
-            }, 7500);
+            if (!isSoberanoTorrent) {
+                playbackWatchdog = setTimeout(() => {
+                    if (video.readyState === 0 && serverMode === 'native' && directServersQueue.length > (serverIndex + 1)) {
+                        console.warn(`[TMDB PLAYER] Watchdog 7.5s activado para [${cleanName}], pasando al siguiente servidor...`);
+                        executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                    }
+                }, 7500);
+            }
 
             showToast(`⚡ ${cleanName} (0 Anuncios • Apple TV)`);
         }
@@ -15027,7 +15053,7 @@ async function loadSoberanoTorrentList(id, type = 'movie', s = 1, e = 1) {
 async function launchSoberanoTorrentPlayback(torrentData, item, season = null, episode = null, stream = null) {
     activeAnime = null;
     activeEpisode = null;
-    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p" };
+    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0 };
     subtitlesEnabled = false;
     currentSubCues = [];
     updateSubButtonsUI("off");
@@ -15050,7 +15076,6 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
 
     const modal = document.getElementById("playerModal");
     const title = item.title || item.name || "Sin título";
-    const epLabel = season ? `T${season} : E${episode}` : "Película Completa";
     
     document.getElementById("playerSeriesTitle").textContent = title;
     document.getElementById("playerEpTitle").textContent = `⚡ Torrent RAM: ${torrentData.filename || (stream && stream.filename) || title} (👤 ${torrentData.numPeers || (stream && stream.seeds) || 0} seeds)`;
@@ -15058,23 +15083,16 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
 
     recordTmdbHistory(item, type, season, episode);
 
-    // Configurar la cola de servidores: Prioridad 1 = Torrent Real P2P en RAM
+    // Configurar la cola de servidores: EXCLUSIVAMENTE el Torrent Real P2P en RAM (0% fallback al proveedor de películas)
     directServersQueue = [
         {
             name: `⚡ Torrent RAM P2P (${stream ? stream.quality : "1080p"} • ${torrentData.numPeers || (stream ? stream.seeds : 0)} seeds)`,
             url: torrentData.direct_stream_url,
+            quality: stream ? stream.quality : "1080p",
             is_sub: false,
             audio_es: stream ? stream.is_es : false
         }
     ];
-
-    if (torrentData.fallback_url) {
-        directServersQueue.push({
-            name: "🌐 Espejo Web (Respaldo)",
-            url: torrentData.fallback_url,
-            is_fallback_api: true
-        });
-    }
 
     currentServerIndex = 0;
     showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]`);
@@ -15089,7 +15107,7 @@ async function playSoberanoTorrent(streamIdx) {
     const s = parseInt(sSelect ? sSelect.value : 1, 10) || 1;
     const e = parseInt(eSelect ? eSelect.value : 1, 10) || 1;
 
-    showToast(`⚡ Conectando Torrent RAM P2P [${stream.quality}] (${stream.seeds} seeds)...`);
+    showToast(`⚡ Conectando con seeds P2P y preparando búfer RAM [${stream.quality}] (${stream.seeds} seeds)...`);
     closeSoberanoSwarmModal();
 
     const title = activeSoberanoItem.name || activeSoberanoItem.title || "";
@@ -15106,9 +15124,10 @@ async function playSoberanoTorrent(streamIdx) {
     };
 
     try {
-        const qUrl = `${PROXY_BASE}/api/soberano/play?hash=${encodeURIComponent(stream.infoHash || "")}&idx=${stream.fileIdx !== undefined ? stream.fileIdx : -1}&title=${encodeURIComponent(title)}&type=${type}&s=${s}&e=${e}&quality=${encodeURIComponent(stream.quality || "1080p")}&seeds=${stream.seeds || 0}`;
+        const isEsParam = (stream.is_es || stream.is_dual) ? '1' : '0';
+        const qUrl = `${PROXY_BASE}/api/soberano/play?hash=${encodeURIComponent(stream.infoHash || "")}&idx=${stream.fileIdx !== undefined ? stream.fileIdx : -1}&title=${encodeURIComponent(title)}&type=${type}&s=${s}&e=${e}&is_es=${isEsParam}&quality=${encodeURIComponent(stream.quality || "1080p")}&seeds=${stream.seeds || 0}`;
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 14000);
+        const timer = setTimeout(() => ctrl.abort(), 28000);
         const resp = await fetch(qUrl, { signal: ctrl.signal });
         clearTimeout(timer);
         const playData = await resp.json();
@@ -15116,13 +15135,15 @@ async function playSoberanoTorrent(streamIdx) {
         if (playData && playData.status === "ok" && playData.direct_stream_url) {
             launchSoberanoTorrentPlayback(playData, itemObj, type === "tv" ? s : null, type === "tv" ? e : null, stream);
         } else {
-            showToast("⚠️ Enjambre lento. Conectando Espejo Web Alternativo...");
-            launchTmdbPlayback(itemObj, type === "tv" ? s : null, type === "tv" ? e : null, "direct_native");
+            showToast(`⚠️ ${(playData && playData.message) || "Este torrent no tiene seeds activos ahora. Elige otro de la lista."}`);
+            const swarmModal = document.getElementById("soberanoSwarmModal");
+            if (swarmModal) swarmModal.classList.add("active");
         }
     } catch (eErr) {
         console.warn("Error resolviendo torrent stream:", eErr);
-        showToast("⚠️ Conectando Espejo Web de Respaldo...");
-        launchTmdbPlayback(itemObj, type === "tv" ? s : null, type === "tv" ? e : null, "direct_native");
+        showToast("⚠️ Tiempo agotado conectando con los seeds de este torrent. Prueba con otro torrent de la lista.");
+        const swarmModal = document.getElementById("soberanoSwarmModal");
+        if (swarmModal) swarmModal.classList.add("active");
     }
 }
 

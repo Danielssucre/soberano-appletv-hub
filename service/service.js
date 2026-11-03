@@ -2081,55 +2081,94 @@ const server = http.createServer(async (req, res) => {
         const e = parseInt(parsed.query.e || parsed.query.episode || 1, 10) || 1;
         const title = parsed.query.title || '';
         const isEs = parsed.query.is_es === '1' || parsed.query.is_es === 'true';
-        const origLang = isEs ? 'es' : 'en';
 
-        // 1. Si tenemos infoHash, resolver el Torrent real en RAM vía Mac M3 Daemon (puerto 9097)
-        if (infoHash) {
-            try {
-                const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}`;
-                const daemonRes = await fetchJson(daemonUrl, {}, 12000);
-                if (daemonRes && daemonRes.status === 'ok') {
-                    const streamPath = daemonRes.stream_path;
-                    const directUrl = `${reqProto}://${reqHost}/api/torrent/stream?path=${encodeURIComponent(streamPath)}`;
-                    
-                    res.writeHead(200, {
-                        'Content-Type': 'application/json; charset=utf-8',
-                        'Cache-Control': 'no-store',
-                        'Access-Control-Allow-Origin': '*'
-                    });
-                    return res.end(JSON.stringify({
-                        status: 'ok',
-                        mode: 'torrent_p2p',
-                        direct_stream_url: directUrl,
-                        name: daemonRes.name,
-                        filename: daemonRes.filename,
-                        sizeBytes: daemonRes.sizeBytes,
-                        numPeers: daemonRes.numPeers,
-                        is_mkv: daemonRes.is_mkv,
-                        fallback_url: `${reqProto}://${reqHost}/api/resolve_tmdb?id=${id}&type=${type}&s=${s}&e=${e}&title=${encodeURIComponent(title)}`
-                    }));
-                }
-            } catch (eDaemon) {
-                console.warn('[SOBERANO_PLAY] Daemon P2P Mac no disponible o timeout:', eDaemon.message);
-            }
+        if (!infoHash) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({ status: 'error', message: 'Falta infoHash del torrent seleccionado.' }));
         }
 
-        // 2. Si el daemon P2P no respondió o no hay hash, usar el Espejo Web Transmutado de Respaldo
+        // Resolver EXCLUSIVAMENTE el Torrent real en RAM + JIT HLS vía Mac M3 Daemon (puerto 9097)
+        // PROHIBIDO hacer fallback al proveedor de películas/series (Cuevana/Framex)
         try {
-            const playData = await resolveTmdbStream(id, type, s, e, reqHost, origLang, title, title, false, reqProto);
-            res.writeHead(200, {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Cache-Control': 'no-store',
-                'Access-Control-Allow-Origin': '*'
-            });
-            return res.end(JSON.stringify(playData));
-        } catch (ePlay) {
-            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-            return res.end(JSON.stringify({ status: 'error', message: ePlay.message }));
+            const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}`;
+            const daemonRes = await fetchJson(daemonUrl, {}, 26000);
+            if (daemonRes && daemonRes.status === 'ok') {
+                const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
+                const directHlsUrl = `${reqProto}://${reqHost}/api/torrent/hls/${cleanHash}/index.m3u8`;
+
+                res.writeHead(200, {
+                    'Content-Type': 'application/json; charset=utf-8',
+                    'Cache-Control': 'no-store',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                return res.end(JSON.stringify({
+                    status: 'ok',
+                    mode: 'torrent_p2p',
+                    infoHash: cleanHash,
+                    direct_stream_url: directHlsUrl,
+                    name: daemonRes.name,
+                    filename: daemonRes.filename,
+                    sizeBytes: daemonRes.sizeBytes,
+                    numPeers: daemonRes.numPeers,
+                    videoCodec: daemonRes.videoCodec,
+                    audioLang: daemonRes.audioLang,
+                    hls_ready: daemonRes.hls_ready,
+                    is_mkv: daemonRes.is_mkv
+                }));
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({
+                status: 'error',
+                message: (daemonRes && daemonRes.message) || 'El torrent no tiene seeds disponibles en este momento. Prueba otro torrent de la lista.'
+            }));
+        } catch (eDaemon) {
+            console.warn('[SOBERANO_PLAY] Error o timeout en daemon P2P Mac:', eDaemon.message);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({
+                status: 'error',
+                message: 'Tiempo agotado conectando con los seeds de este torrent. Selecciona otro torrent con más seeds.'
+            }));
         }
     }
 
-    // Proxy para el flujo de streaming del Torrent en RAM desde el Mac M3
+    // Proxy HLS (.m3u8 y segmentos .ts) del Torrent en RAM desde el Mac M3
+    if (parsed.pathname.indexOf('/api/torrent/hls/') === 0) {
+        const subHlsPath = parsed.pathname.replace(/^\/api\/torrent\/hls\//, '');
+        const reqOpts = {
+            hostname: ALIGNER_HOST,
+            port: 9097,
+            path: `/hls/${subHlsPath}`,
+            method: req.method,
+            headers: {}
+        };
+
+        const preq = http.request(reqOpts, (pres) => {
+            const outHeaders = Object.assign({}, pres.headers, {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                'Access-Control-Allow-Headers': '*'
+            });
+            res.writeHead(pres.statusCode, outHeaders);
+            pres.pipe(res);
+        });
+
+        preq.on('error', (err) => {
+            console.warn('[TORRENT_HLS_PROXY] Error conectando con Mac torrent daemon:', err.message);
+            if (!res.headersSent) {
+                res.writeHead(502, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
+                res.end('Error conectando con el motor HLS Torrent en RAM.');
+            }
+        });
+
+        req.on('close', () => {
+            try { preq.abort(); } catch (e) {}
+        });
+
+        preq.end();
+        return;
+    }
+
+    // Proxy para el flujo de streaming crudo del Torrent en RAM desde el Mac M3
     if (parsed.pathname === '/api/torrent/stream') {
         const streamPath = parsed.query.path || '';
         if (!streamPath) {
