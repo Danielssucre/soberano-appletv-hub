@@ -106,10 +106,18 @@ const TRACKERS = [
     'udp://explodie.org:6969/announce',
     'udp://tracker.dler.org:6969/announce',
     'udp://exodus.desync.com:6969/announce',
-    'http://tracker.opentrackr.org:1337/announce',
-    'wss://tracker.openwebtorrent.com',
-    'wss://tracker.btorrent.xyz'
+    'http://tracker.opentrackr.org:1337/announce'
+    // Sin trackers wss:// — los peers WebRTC (simple-peer) emitían 'error' no capturado
+    // al destruir el torrent y tumbaban el daemon (RTCError: User-Initiated Abort).
 ];
+
+// Guardia de proceso: un peer roto jamás debe tumbar el daemon completo.
+process.on('uncaughtException', (err) => {
+    console.warn('[SOBERANO_DAEMON] Excepción no capturada (daemon sigue vivo):', err && (err.code || ''), err && err.message);
+});
+process.on('unhandledRejection', (reason) => {
+    console.warn('[SOBERANO_DAEMON] Promesa rechazada sin manejar (daemon sigue vivo):', reason && reason.message ? reason.message : reason);
+});
 
 // Clean HLS base directory on startup
 try {
@@ -122,7 +130,7 @@ const client = new WebTorrent({
     downloadLimit: 8 * 1024 * 1024, // 8 MB/s cap to keep Mac M3 cool & responsive
     uploadLimit: 256 * 1024,
     dht: true,
-    tracker: true,
+    tracker: { wrtc: false }, // Node puro: sin WebRTC (fuente del crash)
     utp: true,
     webSeeds: true
 });

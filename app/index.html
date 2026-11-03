@@ -11568,6 +11568,9 @@
 
         function syncAirPlayHlsSubtitleManifest(explicitSubUrl = null) {
             if (!video || !subtitlesEnabled) return;
+            // Solo recargar el manifiesto con subtítulos cuando AirPlay está REALMENTE activo;
+            // en reproducción local el overlay DOM ya muestra los subtítulos sin tocar el stream.
+            if (!video.webkitCurrentPlaybackTargetIsWireless) return;
             const isAppleWebKitHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
             if (!isAppleWebKitHls || !PROXY_BASE) return;
 
