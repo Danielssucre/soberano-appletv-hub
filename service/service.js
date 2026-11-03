@@ -1913,9 +1913,10 @@ function parseTorrentStream(stream) {
     const trackerMatch = rawTitle.match(/⚙️\s*([^\n]+)/);
     const tracker = trackerMatch ? trackerMatch[1].trim() : '';
 
-    // Detección de Idioma
-    const isEs = /🇪🇸|🇲🇽|\b(spa|latino|castellano|spanish|es)\b/i.test(rawTitle);
-    const isDual = /\b(dual|multi|multi-audio|multi-subs|dub)\b/i.test(rawTitle);
+    // Detección de Idioma (Español Latino / Castellano / Multi / Dual)
+    const isEs = /🇪🇸|🇲🇽|\b(spa|latino|castellano|spanish|es|espanol|español|audio latino|subtitulado|cinecalidad|mejortorrent|wolfmax4k|besttorrents)\b/i.test(rawTitle) ||
+                 /cinecalidad|mejortorrent|wolfmax4k|besttorrents/i.test(tracker);
+    const isDual = /\b(dual|multi|multi-audio|multi-subs|dub|tri-audio)\b/i.test(rawTitle);
 
     // Detección de HDR / Dolby Vision
     const isHdr = /\b(hdr|hdr10|hdr10\+|dv|dolby vision)\b/i.test(rawTitle) || /\b(hdr|dv)\b/i.test(name);
@@ -2011,11 +2012,36 @@ async function getSoberanoTorrentStreams(id, type = 'movie', s = 1, e = 1) {
         return SOBERANO_STREAMS_CACHE.get(cacheKey);
     }
 
-    const tUrl = `https://torrentio.strem.fun/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`;
+    // ENJAMBRE FEDERADO MULTI-CLUSTER DE TORRENTS ($0.00 USD)
+    // Agrega en paralelo:
+    // 1. Torrentio Global por defecto (YTS, EZTV, 1337x, RARBG, ThePirateBay, KickassTorrents, etc.)
+    // 2. Torrentio Especializado en Español y P2P Regional (Cinecalidad, MejorTorrent, Wolfmax4k, BestTorrents, Comando, etc.)
+    // 3. JackettIO P2P fallback
+    const spanishProviders = 'yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,rutor,rutracker,comando,bludv,micoleaodublado,torrent9,ilcorsaronero,mejortorrent,wolfmax4k,cinecalidad,besttorrents';
+    const endpoints = [
+        `https://torrentio.strem.fun/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`,
+        `https://torrentio.strem.fun/providers=${spanishProviders}/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`,
+        `https://jackettio.elfhosted.com/stream/${isTv ? 'series' : 'movie'}/${streamId}.json`
+    ];
+
     try {
-        const rawData = await fetchJson(tUrl, { 'User-Agent': 'Mozilla/5.0' }, 6500);
-        const streams = (rawData && Array.isArray(rawData.streams)) ? rawData.streams : [];
-        const parsed = streams.map(parseTorrentStream);
+        const responses = await safeAll(endpoints.map(u => fetchJson(u, { 'User-Agent': 'Mozilla/5.0' }, 6500)));
+        const seenHashes = new Set();
+        const combinedStreams = [];
+
+        responses.forEach(raw => {
+            if (raw && Array.isArray(raw.streams)) {
+                raw.streams.forEach(st => {
+                    const h = (st.infoHash || '').toLowerCase();
+                    if (h && !seenHashes.has(h)) {
+                        seenHashes.add(h);
+                        combinedStreams.push(st);
+                    }
+                });
+            }
+        });
+
+        const parsed = combinedStreams.map(parseTorrentStream);
 
         // Clasificar y ordenar por prioridad: Seeds descendentes + Calidad 1080p/4K
         parsed.sort((a, b) => {
