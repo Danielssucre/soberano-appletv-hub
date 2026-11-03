@@ -10597,7 +10597,7 @@
                     showToast('📺 Transmitiendo en pantalla con AirPlay');
                     btn.classList.add('airplay-active');
                     enforceSpanishTracks(vid);
-                    if (subtitlesEnabled) {
+                    if (subtitlesEnabled && !vid.src.includes('/api/torrent/hls/')) {
                         syncAirPlayHlsSubtitleManifest();
                     }
                 } else {
@@ -11551,7 +11551,11 @@
                 subOverlay.innerHTML = '';
                 return;
             }
-            if (video && video.webkitCurrentPlaybackTargetIsWireless) {
+            // En Apple WebKit (iOS Safari/iPadOS/macOS) o durante AirPlay inalámbrico, AVPlayer nativo
+            // renderiza directamente la pista WebVTT en el lienzo de video y en el televisor.
+            // Ocultar la capa DOM para evitar duplicidad o que los subtítulos queden retenidos en el móvil.
+            const isAppleWebKit = video && !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
+            if (isAppleWebKit || (video && video.webkitCurrentPlaybackTargetIsWireless)) {
                 subOverlay.style.display = 'none';
                 return;
             }
@@ -11577,6 +11581,13 @@
 
             const currentSrc = video.currentSrc || video.src || tmdbDirectStreamUrl || '';
             if (!currentSrc || (!currentSrc.includes('.m3u8') && !currentSrc.includes('/api/torrent/hls/'))) return;
+
+            // SOBERANO TORRENT P2P: index.m3u8 ya es un Multivariant Master Playlist nativo (#EXT-X-MEDIA:TYPE=SUBTITLES).
+            // Prohibido re-envolverlo (causa doble master anidado que rompe los subtítulos en AirPlay).
+            if (currentSrc.includes('/api/torrent/hls/')) {
+                enforceSpanishTracks(video);
+                return;
+            }
 
             if (!currentSrc.includes('/api/hls_sub_master.m3u8')) {
                 lastRawBaseHlsUrl = currentSrc;
@@ -11668,10 +11679,14 @@
                 }
 
                 const reqTrack = (targetTrackIdx !== null && targetTrackIdx !== undefined) ? targetTrackIdx : 0;
+                let hashParam = '';
+                if (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p' && currentTmdbPlaying.hash) {
+                    hashParam = `&hash=${encodeURIComponent(currentTmdbPlaying.hash)}`;
+                }
 
                 // 1. Consultar API unificada /api/subtitles/auto del servidor Soberano
                 if (PROXY_BASE) {
-                    const qUrl = `${PROXY_BASE}/api/subtitles/auto?id=${encodeURIComponent(id)}&type=${encodeURIComponent(type)}&s=${s}&e=${e}&title=${encodeURIComponent(title)}&slug=${encodeURIComponent(slug)}&track=${reqTrack}`;
+                    const qUrl = `${PROXY_BASE}/api/subtitles/auto?id=${encodeURIComponent(id)}&type=${encodeURIComponent(type)}&s=${s}&e=${e}&title=${encodeURIComponent(title)}&slug=${encodeURIComponent(slug)}&track=${reqTrack}${hashParam}`;
                     const ctrl = new AbortController();
                     const timer = setTimeout(() => ctrl.abort(), 11000);
                     const resp = await fetch(qUrl, { signal: ctrl.signal, cache: 'no-store' });
@@ -14426,7 +14441,7 @@
                         video.preferredForwardBufferDuration = 4.0;
                     }
                     let initialStreamUrl = tmdbDirectStreamUrl;
-                    if ((subtitlesEnabled || currentCustomSub) && (tmdbDirectStreamUrl.includes('.m3u8') || tmdbDirectStreamUrl.includes('/api/torrent/hls/'))) {
+                    if (!isSoberanoTorrent && (subtitlesEnabled || currentCustomSub) && tmdbDirectStreamUrl.includes('.m3u8')) {
                         const subHttpUrl = currentCustomSub || `${PROXY_BASE}/subtitles/active_es.vtt`;
                         initialStreamUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(tmdbDirectStreamUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
                     }
@@ -14466,7 +14481,7 @@
                     });
                 } else {
                     let initialStreamUrl = tmdbDirectStreamUrl;
-                    if ((subtitlesEnabled || currentCustomSub) && (tmdbDirectStreamUrl.includes('.m3u8') || tmdbDirectStreamUrl.includes('/api/torrent/hls/'))) {
+                    if (!isSoberanoTorrent && (subtitlesEnabled || currentCustomSub) && tmdbDirectStreamUrl.includes('.m3u8')) {
                         const subHttpUrl = currentCustomSub || `${PROXY_BASE}/subtitles/active_es.vtt`;
                         initialStreamUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(tmdbDirectStreamUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
                     }
@@ -14715,28 +14730,35 @@
         }
 
         function enforceSpanishTracks(videoEl) {
-            // SOBERANO ANTI-DUPLICATION SHIELD + AIRPLAY 2 SUBTITLE BRIDGE:
-            // En pantalla inline local todos los subtítulos se pintan en la capa DOM 'soberanoSubOverlay'.
-            // En pantalla completa nativa de iOS (webkitDisplayingFullscreen) O durante transmisión
-            // inalámbrica AirPlay (webkitCurrentPlaybackTargetIsWireless), se activa tr.mode = 'showing'
-            // para que el receptor AirPlay (TV / Apple TV) y el reproductor nativo muestren los subtítulos.
+            // SOBERANO AIRPLAY 2 NATIVE SUBTITLE BRIDGE:
+            // Activar siempre tr.mode = 'showing' en las pistas nativas en español cuando los subtítulos estén
+            // habilitados para que AVPlayer (iOS) y el receptor AirPlay 2 (LG webOS Smart TV / Apple TV)
+            // muestren los subtítulos en la pantalla del televisor sin depender de hacks DOM.
             if (hlsPlayer) {
                 hlsPlayer.subtitleDisplay = false;
                 if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
             }
             if (!videoEl || !videoEl.textTracks) return;
-            const isIosFullscreen = !!(videoEl.webkitDisplayingFullscreen || document.fullscreenElement === videoEl);
-            const isWirelessAirPlay = !!videoEl.webkitCurrentPlaybackTargetIsWireless;
-            const shouldShowNativeTrack = (isIosFullscreen || isWirelessAirPlay) && subtitlesEnabled;
+            const isAppleWebKit = !window.webOS && !navigator.userAgent.includes('Web0S') && videoEl.canPlayType('application/vnd.apple.mpegurl');
             const overlayEl = document.getElementById('soberanoSubOverlay');
+
             for (let i = 0; i < videoEl.textTracks.length; i++) {
                 const tr = videoEl.textTracks[i];
-                if (shouldShowNativeTrack && (tr.language === 'es' || tr.label === 'Español' || tr.id === 'soberanoNativeEsTrack')) {
-                    tr.mode = 'showing';
-                    if (isIosFullscreen && overlayEl) overlayEl.style.display = 'none';
-                } else {
-                    tr.mode = 'disabled';
+                if (tr.language === 'es' || tr.label === 'Español' || tr.id === 'soberanoNativeEsTrack') {
+                    if (subtitlesEnabled) {
+                        tr.mode = 'showing';
+                    } else {
+                        tr.mode = 'disabled';
+                    }
                 }
+            }
+
+            if (isAppleWebKit && subtitlesEnabled && overlayEl) {
+                // En Apple WebKit (iOS/iPadOS/macOS), AVPlayer nativo ya dibuja la pista WebVTT tanto en el teléfono
+                // como en el Smart TV LG vía AirPlay. Ocultar la capa DOM para evitar subtítulos duplicados o bloqueados en el móvil.
+                overlayEl.style.display = 'none';
+                overlayEl.removeAttribute('data-active-text');
+                overlayEl.innerHTML = '';
             }
         }
         if (typeof video !== 'undefined' && video) {
@@ -15132,10 +15154,12 @@ async function loadSoberanoTorrentList(id, type = 'movie', s = 1, e = 1) {
 async function launchSoberanoTorrentPlayback(torrentData, item, season = null, episode = null, stream = null) {
     activeAnime = null;
     activeEpisode = null;
-    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0 };
-    subtitlesEnabled = false;
+    const activeHash = (torrentData.infoHash || (stream && stream.infoHash) || "").toLowerCase();
+    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0, hash: activeHash };
+    subtitlesEnabled = true;
+    currentCustomSub = null;
     currentSubCues = [];
-    updateSubButtonsUI("off");
+    updateSubButtonsUI("on");
     const type = item.media_type || (season ? "tv" : "movie");
     const s = season || 1;
     const e = episode || 1;

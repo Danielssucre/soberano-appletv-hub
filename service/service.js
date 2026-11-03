@@ -945,6 +945,10 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                 if (!fs.existsSync(SUBTITLES_DIR)) fs.mkdirSync(SUBTITLES_DIR);
                 fs.writeFileSync(path.join(SUBTITLES_DIR, staticFileName), hlsReadyVtt, 'utf8');
                 fs.writeFileSync(path.join(SUBTITLES_DIR, 'active_es.vtt'), hlsReadyVtt, 'utf8');
+                var torrentHash = (params.hash || params.infoHash || '').toLowerCase().trim();
+                if (torrentHash && /^[a-f0-9]{40}$/.test(torrentHash)) {
+                    fs.writeFileSync(path.join(SUBTITLES_DIR, torrentHash + '_es.vtt'), hlsReadyVtt, 'utf8');
+                }
             } catch (eWriteSub) {}
 
             const staticVttUrl = `${reqProto}://${reqHost}/subtitles/${staticFileName}`;
@@ -988,6 +992,10 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                     if (!fs.existsSync(SUBTITLES_DIR)) fs.mkdirSync(SUBTITLES_DIR);
                     fs.writeFileSync(path.join(SUBTITLES_DIR, staticFileName), vttTrans, 'utf8');
                     fs.writeFileSync(path.join(SUBTITLES_DIR, 'active_es.vtt'), vttTrans, 'utf8');
+                    var torrentHashFb = (params.hash || params.infoHash || '').toLowerCase().trim();
+                    if (torrentHashFb && /^[a-f0-9]{40}$/.test(torrentHashFb)) {
+                        fs.writeFileSync(path.join(SUBTITLES_DIR, torrentHashFb + '_es.vtt'), vttTrans, 'utf8');
+                    }
                 } catch (eW) {}
                 const staticVttUrl = `${reqProto}://${reqHost}/subtitles/${staticFileName}`;
                 return {
@@ -2174,7 +2182,7 @@ const server = http.createServer(async (req, res) => {
                     '#EXTM3U',
                     '#EXT-X-VERSION:6',
                     '#EXT-X-INDEPENDENT-SEGMENTS',
-                    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI="sub.m3u8"',
+                    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog",URI="sub.m3u8"',
                     '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",SUBTITLES="subs"',
                     'video.m3u8',
                     ''
@@ -2241,7 +2249,10 @@ const server = http.createServer(async (req, res) => {
                 const cumStart = parseFloat(parsed.query.cum || '0.0');
                 const cumEnd = cumStart + dur;
 
-                let localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+                let localDiskPath = path.join(SUBTITLES_DIR, infoHash + '_es.vtt');
+                if (!fs.existsSync(localDiskPath)) {
+                    localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+                }
                 let matchedCues = [];
                 if (fs.existsSync(localDiskPath)) {
                     try {
@@ -2253,7 +2264,7 @@ const server = http.createServer(async (req, res) => {
 
                 const vttOut = [
                     'WEBVTT',
-                    'X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:126000',
+                    'X-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000',
                     ''
                 ];
                 for (let c = 0; c < matchedCues.length; c++) {
@@ -2267,7 +2278,7 @@ const server = http.createServer(async (req, res) => {
                 res.writeHead(200, {
                     'Content-Type': 'text/vtt; charset=utf-8',
                     'Content-Length': vttBuf.length,
-                    'Cache-Control': 'public, max-age=3600',
+                    'Cache-Control': 'no-store, no-cache, must-revalidate',
                     'Access-Control-Allow-Origin': '*'
                 });
                 return res.end(vttBuf);
@@ -2589,8 +2600,15 @@ const server = http.createServer(async (req, res) => {
         const subMediaUri = `${hostBase}/api/hls_sub_media.m3u8?sub=${encodeURIComponent(subUrl)}`;
         const mediaTag = `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI="${subMediaUri}"`;
 
-        // Si no es un manifiesto maestro externo (ej. Torrent HLS o Media Playlist directo), envolver en Master Playlist
-        if (streamUrl.indexOf('/api/torrent/hls/') !== -1 || streamUrl.indexOf('/stream.m3u8') !== -1) {
+        // Si el stream es de Torrent Soberano (/api/torrent/hls/), ya es un Multivariant Master Playlist completo con subtítulos in-manifest.
+        // Prohibido re-envolver: redirigir directamente al stream nativo para evitar master anidado inválido en AirPlay.
+        if (streamUrl.indexOf('/api/torrent/hls/') !== -1) {
+            res.writeHead(302, { 'Location': streamUrl, 'Access-Control-Allow-Origin': '*' });
+            return res.end();
+        }
+
+        // Si no es un manifiesto maestro externo (ej. Media Playlist directo de anime /stream.m3u8), envolver en Master Playlist
+        if (streamUrl.indexOf('/stream.m3u8') !== -1) {
             const masterM3u8 = [
                 '#EXTM3U',
                 '#EXT-X-VERSION:4',
