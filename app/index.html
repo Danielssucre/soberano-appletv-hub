@@ -15176,6 +15176,9 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     currentServerIndex = 0;
     showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]`);
     executeTmdbDirectPlayback(0, 0);
+    setTimeout(() => {
+        autoSearchAndAnchorSpanishSub(0);
+    }, 400);
 }
 
 async function playSoberanoTorrent(streamIdx) {

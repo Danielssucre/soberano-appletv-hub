@@ -2158,41 +2158,160 @@ const server = http.createServer(async (req, res) => {
         }
     }
 
-    // Proxy HLS (.m3u8 y segmentos .ts) del Torrent en RAM desde el Mac M3
+    // In-Manifest Master Playlist + HLS Proxy (.m3u8 y segmentos .ts) para Torrent P2P
     if (parsed.pathname.indexOf('/api/torrent/hls/') === 0) {
         const subHlsPath = parsed.pathname.replace(/^\/api\/torrent\/hls\//, '');
-        const reqOpts = {
-            hostname: ALIGNER_HOST,
-            port: 9097,
-            path: `/hls/${subHlsPath}`,
-            method: req.method,
-            headers: {}
-        };
+        const match = subHlsPath.match(/^([a-f0-9]{40})\/(.*)$/i);
+        if (match) {
+            const infoHash = match[1].toLowerCase();
+            const relFile = match[2].split('?')[0];
 
-        const preq = http.request(reqOpts, (pres) => {
-            const outHeaders = Object.assign({}, pres.headers, {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-                'Access-Control-Allow-Headers': '*'
-            });
-            res.writeHead(pres.statusCode, outHeaders);
-            pres.pipe(res);
-        });
-
-        preq.on('error', (err) => {
-            console.warn('[TORRENT_HLS_PROXY] Error conectando con Mac torrent daemon:', err.message);
-            if (!res.headersSent) {
-                res.writeHead(502, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
-                res.end('Error conectando con el motor HLS Torrent en RAM.');
+            // 1. Multivariant Master Playlist nativo (#EXT-X-MEDIA:TYPE=SUBTITLES)
+            // Garantiza que AirPlay 2 y el receptor del televisor LG carguen video y subtítulos
+            // de forma nativa e inseparable sin recurrir a sideloading DOM en el móvil.
+            if (relFile === 'index.m3u8') {
+                const masterLines = [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:6',
+                    '#EXT-X-INDEPENDENT-SEGMENTS',
+                    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,URI="sub.m3u8"',
+                    '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",SUBTITLES="subs"',
+                    'video.m3u8',
+                    ''
+                ].join('\n');
+                res.writeHead(200, {
+                    'Content-Type': 'application/vnd.apple.mpegurl',
+                    'Content-Length': Buffer.byteLength(masterLines),
+                    'Cache-Control': 'no-store, no-cache, must-revalidate',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                return res.end(masterLines);
             }
-        });
 
-        req.on('close', () => {
-            try { preq.abort(); } catch (e) {}
-        });
+            // 2. Subtitle Media Playlist generado dinámicamente y sincronizado con el video
+            if (relFile === 'sub.m3u8') {
+                try {
+                    const upstreamVideoM3u8 = await fetchText(`http://${ALIGNER_HOST}:9097/hls/${infoHash}/index.m3u8`, {}, 8000);
+                    if (!upstreamVideoM3u8) throw new Error('Video stream not ready');
+                    const vLines = upstreamVideoM3u8.replace(/\r/g, '').split('\n');
+                    const subLines = [
+                        '#EXTM3U',
+                        '#EXT-X-VERSION:6',
+                        '#EXT-X-TARGETDURATION:4',
+                        '#EXT-X-MEDIA-SEQUENCE:0',
+                        '#EXT-X-PLAYLIST-TYPE:EVENT',
+                        '#EXT-X-INDEPENDENT-SEGMENTS',
+                        '#EXT-X-DISCONTINUITY'
+                    ];
+                    let segIdx = 0;
+                    let cumTime = 0.0;
+                    for (let i = 0; i < vLines.length; i++) {
+                        const ln = vLines[i].trim();
+                        if (ln.indexOf('#EXTINF:') === 0) {
+                            const dur = parseFloat(ln.substring(8).replace(',', '')) || 4.0;
+                            subLines.push(`#EXTINF:${dur.toFixed(6)},`);
+                            subLines.push(`sub_seg.vtt?seg=${segIdx}&dur=${dur.toFixed(3)}&cum=${cumTime.toFixed(3)}`);
+                            cumTime += dur;
+                            segIdx++;
+                        }
+                    }
+                    if (upstreamVideoM3u8.indexOf('#EXT-X-ENDLIST') !== -1) {
+                        subLines.push('#EXT-X-ENDLIST');
+                    }
+                    subLines.push('');
+                    const subM3u8Body = subLines.join('\n');
+                    res.writeHead(200, {
+                        'Content-Type': 'application/vnd.apple.mpegurl',
+                        'Content-Length': Buffer.byteLength(subM3u8Body),
+                        'Cache-Control': 'no-store, no-cache, must-revalidate',
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    return res.end(subM3u8Body);
+                } catch (eSub) {
+                    console.warn('[SOBERANO_SUB_M3U8] Error generando sub.m3u8 para torrent:', eSub.message);
+                    res.writeHead(502, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
+                    return res.end('Error generando pista de subtítulos');
+                }
+            }
 
-        preq.end();
-        return;
+            // 3. Segmentos WebVTT alineados al fotograma con cabecera X-TIMESTAMP-MAP
+            if (relFile === 'sub_seg.vtt') {
+                const segIdx = parseInt(parsed.query.seg || '0', 10);
+                const dur = parseFloat(parsed.query.dur || '4.0');
+                const cumStart = parseFloat(parsed.query.cum || '0.0');
+                const cumEnd = cumStart + dur;
+
+                let localDiskPath = path.join(SUBTITLES_DIR, 'active_es.vtt');
+                let matchedCues = [];
+                if (fs.existsSync(localDiskPath)) {
+                    try {
+                        const content = fs.readFileSync(localDiskPath, 'utf8');
+                        const cues = parseVttForHls(content);
+                        matchedCues = cues.filter(c => c.end >= cumStart && c.start < cumEnd);
+                    } catch (eC) {}
+                }
+
+                const vttOut = [
+                    'WEBVTT',
+                    'X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:126000',
+                    ''
+                ];
+                for (let c = 0; c < matchedCues.length; c++) {
+                    const item = matchedCues[c];
+                    vttOut.push((c + 1).toString());
+                    vttOut.push(`${formatVttTime(item.start)} --> ${formatVttTime(item.end)}`);
+                    vttOut.push(item.text);
+                    vttOut.push('');
+                }
+                const vttBuf = Buffer.from(vttOut.join('\n'), 'utf8');
+                res.writeHead(200, {
+                    'Content-Type': 'text/vtt; charset=utf-8',
+                    'Content-Length': vttBuf.length,
+                    'Cache-Control': 'public, max-age=3600',
+                    'Access-Control-Allow-Origin': '*'
+                });
+                return res.end(vttBuf);
+            }
+
+            // 4. Mapeo del flujo de video real (video.m3u8 -> index.m3u8 en Mac M3)
+            let proxyUpstreamPath = `/hls/${subHlsPath}`;
+            if (relFile === 'video.m3u8') {
+                proxyUpstreamPath = `/hls/${infoHash}/index.m3u8`;
+            }
+
+            const reqOpts = {
+                hostname: ALIGNER_HOST,
+                port: 9097,
+                path: proxyUpstreamPath,
+                method: req.method,
+                headers: {}
+            };
+
+            const preq = http.request(reqOpts, (pres) => {
+                const outHeaders = Object.assign({}, pres.headers, {
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                    'Access-Control-Allow-Headers': '*'
+                });
+                res.writeHead(pres.statusCode, outHeaders);
+                pres.pipe(res);
+            });
+
+            preq.on('error', (err) => {
+                console.warn('[TORRENT_HLS_PROXY] Error conectando con Mac torrent daemon:', err.message);
+                if (!res.headersSent) {
+                    res.writeHead(502, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
+                    res.end('Error conectando con el motor HLS Torrent en RAM.');
+                }
+            });
+
+            req.on('close', () => {
+                try { preq.abort(); } catch (e) {}
+            });
+
+            preq.end();
+            return;
+        }
     }
 
     // Proxy para el flujo de streaming crudo del Torrent en RAM desde el Mac M3
