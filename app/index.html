@@ -1026,19 +1026,40 @@
 
         .player-header-osd {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+            padding: 24px 32px 10px 32px;
+            background: linear-gradient(180deg, rgba(8, 11, 17, 0.95) 0%, rgba(8, 11, 17, 0.5) 75%, transparent 100%);
         }
 
         .player-header-top-row {
-            display: contents;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+        }
+
+        .player-server-pills {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 8px;
+            padding: 2px 0 6px 0;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .player-server-pills::-webkit-scrollbar {
+            display: none;
         }
 
         .player-sync-toolbar {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            margin-top: 4px;
+            display: none !important;
+        }
+
+        .btn-fullscreen-ios {
+            display: none !important;
         }
 
         .player-titles {
@@ -2301,11 +2322,13 @@
 
         /* TMDB & Subtitles Extended Styles */
         .player-server-pills {
-            display: flex;
+            display: none;
             align-items: center;
             gap: 8px;
-            flex-wrap: wrap;
-            margin: 0 16px;
+            flex-wrap: nowrap !important;
+            overflow-x: auto;
+            scrollbar-width: none;
+            margin: 0;
         }
         .server-pill-btn {
             background: rgba(255, 255, 255, 0.12);
@@ -4006,13 +4029,7 @@
                             <i class="fa fa-times"></i>
                         </button>
                     </div>
-                    <div class="player-server-pills" id="playerServerPills">
-                        <button class="server-pill-btn active" data-srv="direct_native" onclick="switchPlayerServer('direct_native')">⚡ Stream Nativo (0 Anuncios)</button>
-                        <button class="server-pill-btn" data-srv="audio_latino" onclick="switchPlayerAudio('spa-latino')">🇲🇽 Audio Latino</button>
-                        <button class="server-pill-btn" data-srv="audio_castellano" onclick="switchPlayerAudio('spa-castellano')">🇪🇸 Castellano</button>
-                        <button class="server-pill-btn" data-srv="audio_original" onclick="switchPlayerAudio('eng')">🇺🇸 VO</button>
-                        <button class="server-pill-btn sub-upload-pill" id="btnAutoSubPill" onclick="onAutoSubPillClick()" title="Buscar y anclar subtítulo en español automáticamente"><i class="fa fa-closed-captioning"></i> +Sub ES</button>
-                    </div>
+                    <div class="player-server-pills" id="playerServerPills" style="display:none;"></div>
                 </div>
 
                 <!-- Bottom Controls Bar -->
@@ -14406,27 +14423,45 @@
 
         function updateTmdbServerPills(activeIdx = 0) {
             const pillsContainer = document.getElementById('playerServerPills');
-            if (!pillsContainer || !directServersQueue || directServersQueue.length === 0) return;
+            if (!pillsContainer) return;
+            if (!directServersQueue || directServersQueue.length <= 1) {
+                pillsContainer.innerHTML = '';
+                pillsContainer.style.display = 'none';
+                return;
+            }
 
+            pillsContainer.style.display = 'flex';
+            // Minimalismo Funcional: máximo 4 opciones principales limpias
+            const maxPills = 4;
+            const topServers = directServersQueue.slice(0, maxPills);
             let html = '';
-            directServersQueue.forEach((srv, idx) => {
+            topServers.forEach((srv, idx) => {
                 const isAct = idx === activeIdx ? 'active' : '';
-                const shortName = (srv.name || ('Servidor ' + (idx + 1)))
-                    .replace(/^Framex\s*/i, '')
-                    .replace(/^Cuevana3c\s*/i, '')
-                    .replace(/^Gnula\s*/i, '')
-                    .split('(')[0].trim() || ('Servidor ' + (idx + 1));
-                const qTag = (srv.quality || '').includes('1080') ? '1080p' : 'HD';
-                const audioTag = srv.audio_es ? '🇲🇽 ' : (srv.is_sub ? '🇺🇸 ' : '⚡ ');
-                html += `<button class="server-pill-btn ${isAct}" onclick="executeTmdbDirectPlayback(${idx}, video.currentTime || 0)">${audioTag}${shortName} (${qTag})</button>`;
+                let label = '';
+                if (srv.audio_es) {
+                    label = '🇲🇽 Audio Latino';
+                } else if ((srv.name || '').toLowerCase().includes('castellano')) {
+                    label = '🇪🇸 Castellano';
+                } else if (srv.server && srv.server.includes('Torrent')) {
+                    const qTag = (srv.quality || '').includes('1080') ? '1080p' : (srv.quality || 'HD');
+                    label = `⚡ Torrent (${qTag})`;
+                } else {
+                    const shortName = (srv.name || ('Servidor ' + (idx + 1)))
+                        .replace(/^Framex\s*/i, '')
+                        .replace(/^Cuevana3c\s*/i, '')
+                        .replace(/^Gnula\s*/i, '')
+                        .split('(')[0].trim() || ('Opción ' + (idx + 1));
+                    const qTag = (srv.quality || '').includes('1080') ? '1080p' : 'HD';
+                    label = `⚡ ${shortName} (${qTag})`;
+                }
+                html += `<button class="server-pill-btn ${isAct}" onclick="executeTmdbDirectPlayback(${idx}, video.currentTime || 0)">${label}</button>`;
             });
 
-            const totalTracks = (availableSpanishSubs && availableSpanishSubs.length) ? availableSpanishSubs.length : (currentSubCues && currentSubCues.length > 0 ? 1 : 0);
-            const subPillActive = subtitlesEnabled ? 'active' : '';
-            const subPillLabel = subtitlesEnabled
-                ? `<i class="fa fa-check-circle"></i> ${totalTracks > 1 ? `Sub ES (${currentSpanishSubIndex + 1}/${totalTracks})` : 'Sub ES Activo'}`
-                : `<i class="fa fa-closed-captioning"></i> +Sub ES`;
-            html += `<button class="server-pill-btn sub-upload-pill ${subPillActive}" id="btnAutoSubPill" onclick="onAutoSubPillClick()" title="Buscar y anclar subtítulo en español automáticamente">${subPillLabel}</button>`;
+            if (directServersQueue.length > maxPills) {
+                const nextIdx = (activeIdx + 1) % directServersQueue.length;
+                html += `<button class="server-pill-btn" onclick="executeTmdbDirectPlayback(${nextIdx}, video.currentTime || 0)" title="Alternar entre todos los servidores disponibles"><i class="fa fa-shuffle"></i> +${directServersQueue.length - maxPills} más</button>`;
+            }
+
             pillsContainer.innerHTML = html;
         }
 
@@ -14437,7 +14472,10 @@
                 return;
             }
 
-            const isSoberanoTorrent = (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p');
+            const currentCandSrv = directServersQueue[serverIndex];
+            const isSoberanoTorrent = (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p') ||
+                (currentCandSrv && currentCandSrv.url && currentCandSrv.url.includes('/api/soberano/')) ||
+                (tmdbDirectStreamUrl && tmdbDirectStreamUrl.includes('/api/soberano/'));
 
             if (serverIndex >= directServersQueue.length) {
                 // REGLA INMUTABLE SOBERANO: Si estamos reproduciendo un Torrent P2P en RAM,
@@ -14526,7 +14564,7 @@
             }
 
             const isNativeAppleHls = !window.webOS && !navigator.userAgent.includes('Web0S') && video.canPlayType('application/vnd.apple.mpegurl');
-            const isHls = tmdbDirectStreamUrl.includes('.m3u8');
+            const isHls = tmdbDirectStreamUrl.includes('.m3u8') || (currentSrv && currentSrv.format === 'hls') || tmdbDirectStreamUrl.includes('/api/soberano/');
 
             if (video._currentOnLoadedMeta) {
                 video.removeEventListener('loadedmetadata', video._currentOnLoadedMeta);
@@ -14615,11 +14653,25 @@
 
             if (!isSoberanoTorrent) {
                 playbackWatchdog = setTimeout(() => {
-                    if (video.readyState === 0 && serverMode === 'native' && directServersQueue.length > (serverIndex + 1)) {
-                        console.warn(`[TMDB PLAYER] Watchdog 7.5s activado para [${cleanName}], pasando al siguiente servidor...`);
-                        executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                    if (video.readyState === 0 && serverMode === 'native') {
+                        if (directServersQueue.length > (serverIndex + 1)) {
+                            console.warn(`[TMDB PLAYER] Watchdog activado para [${cleanName}], pasando al siguiente servidor (${serverIndex + 2}/${directServersQueue.length})...`);
+                            executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                        } else if (currentTmdbPlaying && !currentTmdbPlaying.retriedFresh) {
+                            console.warn(`[TMDB PLAYER] Watchdog activado, agotados servidores, solicitando nuevos espejos...`);
+                            executeTmdbDirectPlayback(serverIndex + 1, startTime);
+                        }
                     }
-                }, 7500);
+                }, 6000);
+            } else {
+                playbackWatchdog = setTimeout(() => {
+                    if (video.readyState === 0 && serverMode === 'native') {
+                        console.warn(`[TORRENT WATCHDOG] Búfer P2P en RAM tardando en arrancar para [${cleanName}], reintentando carga...`);
+                        if (hlsPlayer) {
+                            hlsPlayer.startLoad();
+                        }
+                    }
+                }, 25000);
             }
 
             showToast(`⚡ ${cleanName} (0 Anuncios • Apple TV)`);

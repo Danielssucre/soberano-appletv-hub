@@ -601,8 +601,39 @@ const TMDB_STREAM_CACHE = new Map();
 // ==============================================================================
 let ALIGNER_CFG = {};
 try { ALIGNER_CFG = JSON.parse(fs.readFileSync(path.join(__dirname, 'aligner.json'), 'utf8')); } catch (e0) {}
-const ALIGNER_HOST = process.env.ALIGNER_HOST || ALIGNER_CFG.host || '192.168.128.5';
+let ACTIVE_ALIGNER_HOST = process.env.ALIGNER_HOST || ALIGNER_CFG.host || '192.168.128.4';
 const ALIGNER_PORT = parseInt(process.env.ALIGNER_PORT || ALIGNER_CFG.port || 9098, 10);
+const ALIGNER_CANDIDATES = ['192.168.128.4', '192.168.128.5', '192.168.128.2', '192.168.128.3'];
+
+function probeAlignerHost(host, timeoutMs = 500) {
+    return new Promise(resolve => {
+        try {
+            const preq = http.get({ hostname: host, port: 9097, path: '/', timeout: timeoutMs }, res => {
+                resolve(true);
+            });
+            preq.on('error', () => resolve(false));
+            preq.on('timeout', () => { preq.abort(); resolve(false); });
+        } catch(e) { resolve(false); }
+    });
+}
+
+async function getLiveAlignerHost() {
+    if (await probeAlignerHost(ACTIVE_ALIGNER_HOST, 400)) {
+        return ACTIVE_ALIGNER_HOST;
+    }
+    for (const cand of ALIGNER_CANDIDATES) {
+        if (cand !== ACTIVE_ALIGNER_HOST && await probeAlignerHost(cand, 400)) {
+            console.log(`[ALIGNER_DISCOVERY] Cambiando daemon host a ${cand}:9097`);
+            ACTIVE_ALIGNER_HOST = cand;
+            try {
+                fs.writeFileSync(path.join(__dirname, 'aligner.json'), JSON.stringify({ host: cand, port: 9097 }));
+            } catch(e) {}
+            return cand;
+        }
+    }
+    return ACTIVE_ALIGNER_HOST;
+}
+
 const ALIGN_TRIGGERED = {};
 
 function alignedName(type, id, s, e) {
@@ -1045,7 +1076,7 @@ function decorateWithAligned(data, id, type, s, e, reqHost, reqProto = "http") {
 }
 
 function alignerRequest(pathAndQuery, timeoutMs, cb) {
-    const req = http.get({ hostname: ALIGNER_HOST, port: ALIGNER_PORT, path: pathAndQuery, timeout: timeoutMs }, (r) => {
+    const req = http.get({ hostname: ACTIVE_ALIGNER_HOST, port: ALIGNER_PORT, path: pathAndQuery, timeout: timeoutMs }, (r) => {
         let b = '';
         r.on('data', (c) => { b += c; });
         r.on('end', () => { try { cb(null, JSON.parse(b)); } catch (er) { cb(er); } });
@@ -1636,7 +1667,7 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
             });
         });
 
-        const candidates = [];
+        const rawCandidates = [];
         let orderIdx = 0;
 
         responses.forEach(data => {
@@ -1644,6 +1675,9 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
             for (let i = 0; i < data.sources.length; i++) {
                 const src = data.sources[i];
                 if (!src || !src.url) continue;
+
+                // Descartar Cloudflare workers caídos / bloqueados (HTTP 403)
+                if (src.url.includes('hybrows.workers.dev')) continue;
 
                 const rawSrv = src.server || ('Servidor ' + (orderIdx + 1));
                 // Omitir espejos redundantes Relay / VPS del mismo cluster para mantener limpia la UI
@@ -1673,7 +1707,7 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
                     .trim();
                 const serverName = `Framex ${serverClean} (${is1080 ? '1080p' : 'HD'})`;
 
-                candidates.push({
+                rawCandidates.push({
                     status: 'ok',
                     id: String(id),
                     type: type,
@@ -1693,14 +1727,25 @@ async function resolveFramexStreams(id, type = 'movie', s = 1, e = 1, origLang =
             }
         });
 
-        return candidates;
+        // Verificación pre-flight en paralelo: descartar streams caídos (403, 502, timeout)
+        const validated = [];
+        await safeAll(rawCandidates.map(async cand => {
+            const isAlive = await checkM3u8Url(cand.direct_stream_url, 2500);
+            if (isAlive) {
+                validated.push(cand);
+            } else {
+                console.warn(`[FRAMEX_PREFLIGHT] Descartado stream inaccesible (403/timeout): ${cand.server} -> ${cand.direct_stream_url.slice(0, 70)}...`);
+            }
+        }));
+
+        return validated;
     } catch (e) {
         console.warn(`[FRAMEX_RESOLVER] Error para ${id} (${type} S${s}E${e}): ${e.message}`);
         return [];
     }
 }
 
-async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http') {
+async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http', preferSpanish = false) {
     try {
         let imdbId = null;
         const extRes = await proxyTmdbRequest(`${type === 'tv' ? 'tv' : 'movie'}/${id}/external_ids`, '');
@@ -1725,7 +1770,10 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http') {
             else if (/[\/\[\.\-_\s](es|spa|esp)[\/\]\.\-_\s]/.test(combined)) isSpanish = true;
             else if (/\b(audio latino|audio castellano|audio espanol|audio español|dual audio)\b/.test(combined)) isSpanish = true;
 
-            if (isSpanish && str.infoHash) {
+            // Si el filtro de español estricto está activo, solo incluir fuentes en español
+            if (preferSpanish && !isSpanish) continue;
+
+            if (str.infoHash) {
                 const seedM = combined.match(/👤\s*(\d+)/);
                 const seeds = seedM ? parseInt(seedM[1], 10) : 0;
                 if (seeds < 1) continue;
@@ -1734,7 +1782,7 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http') {
                 const firstLine = (str.title || '').split('\n')[0].replace(/[^\w\s\.\-\[\]\(\)]/g, ' ').slice(0, 32).trim();
                 const fileIdx = str.fileIdx !== undefined ? str.fileIdx : 0;
 
-                const playUrl = `${reqProto}://${reqHost}/api/soberano/play_stream?hash=${encodeURIComponent(str.infoHash)}&idx=${fileIdx}&name=${encodeURIComponent(firstLine)}&type=${type}&s=${s}&e=${e}&is_es=1`;
+                const playUrl = `${reqProto}://${reqHost}/api/soberano/play_stream?hash=${encodeURIComponent(str.infoHash)}&idx=${fileIdx}&name=${encodeURIComponent(firstLine)}&type=${type}&s=${s}&e=${e}&is_es=${isSpanish ? '1' : '0'}&stream.m3u8`;
 
                 cands.push({
                     status: 'ok',
@@ -1744,14 +1792,14 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http') {
                     episode: String(e),
                     direct_stream_url: playUrl,
                     server: `Torrent Swarm • ${firstLine} (${quality}) [${seeds}s]`,
-                    is_sub: false,
+                    is_sub: !isSpanish,
                     quality: quality,
                     format: 'hls',
-                    audio_es: true,
+                    audio_es: isSpanish,
                     sub_es: null,
                     subtitles: [],
                     seeds: seeds,
-                    base_bonus: Math.min(seeds * 2, 200)
+                    base_bonus: isSpanish ? (300 + Math.min(seeds * 2, 200)) : (40 + Math.min(seeds * 2, 160))
                 });
             }
         }
@@ -1796,7 +1844,7 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
             resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
             resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
             resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto),
-            preferSpanish ? resolveTmdbTorrents(id, type, s, e, reqHost, reqProto) : Promise.resolve([])
+            resolveTmdbTorrents(id, type, s, e, reqHost, reqProto, preferSpanish)
         ]);
 
         const framexCands = triResults[2] || [];
@@ -2276,6 +2324,21 @@ const server = http.createServer(async (req, res) => {
         return res.end();
     }
 
+    // Auto-registro en caliente de IP del Mac M3 Daemon para evitar fallos por DHCP
+    if (parsed.pathname === '/api/daemon/register') {
+        const clientIp = (req.socket && req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+        const hostParam = parsed.query.host || clientIp;
+        if (hostParam && hostParam !== '127.0.0.1' && hostParam !== '::1') {
+            ACTIVE_ALIGNER_HOST = hostParam;
+            try {
+                fs.writeFileSync(path.join(__dirname, 'aligner.json'), JSON.stringify({ host: hostParam, port: 9097 }));
+            } catch(e) {}
+            console.log(`[DAEMON_REGISTER] Host registrado exitosamente: ${hostParam}:9097`);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        return res.end(JSON.stringify({ status: 'ok', host: ACTIVE_ALIGNER_HOST }));
+    }
+
     // 0. SOBERANO PHANTOM-SWARM TORRENT SEARCH & STREAM ENDPOINTS ($0.00 USD)
     if (parsed.pathname === '/api/soberano/search') {
         const q = parsed.query.q || parsed.query.query || '';
@@ -2324,7 +2387,8 @@ const server = http.createServer(async (req, res) => {
         }
 
         try {
-            const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}`;
+            const liveDaemonHost = await getLiveAlignerHost();
+            const daemonUrl = `http://${liveDaemonHost}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}`;
             const daemonRes = await fetchJson(daemonUrl, {}, 35000);
             if (daemonRes && daemonRes.status === 'ok') {
                 const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
@@ -2385,7 +2449,8 @@ const server = http.createServer(async (req, res) => {
                 }
             }
 
-            const daemonUrl = `http://${ALIGNER_HOST}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}` +
+            const liveDaemonHost = await getLiveAlignerHost();
+            const daemonUrl = `http://${liveDaemonHost}:9097/api/torrent/resolve?hash=${encodeURIComponent(infoHash)}&fileIdx=${fileIdx}&name=${encodeURIComponent(title)}&is_es=${isEs ? '1' : '0'}` +
                 (burnSubUrl ? `&sub=${encodeURIComponent(burnSubUrl)}&off=${subOff}` : '');
             const daemonRes = await fetchJson(daemonUrl, {}, 45000);
             if (daemonRes && daemonRes.status === 'ok') {
@@ -2470,7 +2535,8 @@ const server = http.createServer(async (req, res) => {
             // 2. Subtitle Media Playlist generado dinámicamente y sincronizado con el video
             if (relFile === 'sub.m3u8') {
                 try {
-                    const upstreamVideoM3u8 = await fetchText(`http://${ALIGNER_HOST}:9097/hls/${infoHash}/index.m3u8`, {}, 8000);
+                    const liveDaemonHost = await getLiveAlignerHost();
+                    const upstreamVideoM3u8 = await fetchText(`http://${liveDaemonHost}:9097/hls/${infoHash}/index.m3u8`, {}, 8000);
                     if (!upstreamVideoM3u8) throw new Error('Video stream not ready');
                     const vLines = upstreamVideoM3u8.replace(/\r/g, '').split('\n');
                     const subLines = [
@@ -2567,8 +2633,9 @@ const server = http.createServer(async (req, res) => {
                 proxyUpstreamPath = `/hls/${infoHash}/index.m3u8`;
             }
 
+            const liveDaemonHost = await getLiveAlignerHost();
             const reqOpts = {
-                hostname: ALIGNER_HOST,
+                hostname: liveDaemonHost,
                 port: 9097,
                 path: proxyUpstreamPath,
                 method: req.method,
@@ -2614,8 +2681,9 @@ const server = http.createServer(async (req, res) => {
         if (req.headers.range) proxyHeaders['range'] = req.headers.range;
         if (req.headers['accept-encoding']) proxyHeaders['accept-encoding'] = req.headers['accept-encoding'];
 
+        const liveDaemonHost = await getLiveAlignerHost();
         const reqOpts = {
-            hostname: ALIGNER_HOST,
+            hostname: liveDaemonHost,
             port: 9097,
             path: streamPath,
             method: req.method,
