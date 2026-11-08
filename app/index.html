@@ -4196,12 +4196,19 @@
                     </div>
                 </div>
 
-                <!-- Selector de Temporada / Episodio si es Serie o Anime -->
-                <div id="soberanoEpisodeSelectorBar" style="display:none; margin:16px 0; padding:12px; background:rgba(255,255,255,0.05); border-radius:12px; border:1px solid rgba(255,255,255,0.1);">
-                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                        <span style="font-size:13px; font-weight:700; color:#e879f9;"><i class="fa fa-layer-group"></i> Episodio:</span>
-                        <select id="soberanoSeasonSelect" onchange="onSoberanoSeasonEpisodeChange()" style="padding:6px 12px; background:rgba(0,0,0,0.6); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:8px; font-size:13px; outline:none;"></select>
-                        <select id="soberanoEpisodeSelect" onchange="onSoberanoSeasonEpisodeChange()" style="padding:6px 12px; background:rgba(0,0,0,0.6); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:8px; font-size:13px; outline:none;"></select>
+                <!-- Selector de Temporada / Episodio si es Serie o Anime (Apple TV HIG Carrusel de Pastillas) -->
+                <div id="soberanoEpisodeSelectorBar" style="display:none; margin:14px 0; padding:12px 14px; background:rgba(255,255,255,0.04); border-radius:14px; border:1px solid rgba(255,255,255,0.08);">
+                    <div style="margin-bottom:10px;">
+                        <div style="font-size:11.5px; font-weight:700; color:#e879f9; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                            <i class="fa fa-layer-group"></i> Temporada:
+                        </div>
+                        <div id="soberanoSeasonTabs" class="season-tabs-row" style="margin:0; padding:0 0 4px 0; gap:8px;"></div>
+                    </div>
+                    <div>
+                        <div style="font-size:11.5px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                            <i class="fa fa-list-ol"></i> Episodio:
+                        </div>
+                        <div id="soberanoEpisodeTabs" class="season-tabs-row" style="margin:0; padding:0 0 4px 0; gap:8px;"></div>
                     </div>
                 </div>
 
@@ -4216,7 +4223,7 @@
                 </div>
 
                 <!-- Lista de Torrents Reales con Seeds, Calidad y Botón Play Directo en RAM -->
-                <div id="soberanoTorrentList" style="max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+                <div id="soberanoTorrentList" style="max-height:460px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:4px;">
                     <div style="color:var(--text-muted); padding:30px; text-align:center;"><i class="fa fa-spinner fa-spin fa-2x"></i><p style="margin-top:10px;">Consultando enjambre global de torrents...</p></div>
                 </div>
             </div>
@@ -14903,7 +14910,13 @@
         }
 
         function isBurnedTorrent() {
-            return !!(currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p' && currentTmdbPlaying.burned);
+            if (!currentTmdbPlaying) return false;
+            if (currentTmdbPlaying.burned) return true;
+            if (directServersQueue && directServersQueue[currentServerIndex]) {
+                const sUrl = directServersQueue[currentServerIndex].url || '';
+                if (sUrl.includes('burn=1')) return true;
+            }
+            return false;
         }
         function isSoberanoTorrentPlaying() {
             return !!(currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p');
@@ -14969,39 +14982,44 @@
         }
 
         function enforceSpanishTracks(videoEl) {
-            // SOBERANO AIRPLAY 2 NATIVE SUBTITLE BRIDGE:
-            // Activar siempre tr.mode = 'showing' en las pistas nativas en español cuando los subtítulos estén
-            // habilitados para que AVPlayer (iOS) y el receptor AirPlay 2 (LG webOS Smart TV / Apple TV)
-            // muestren los subtítulos en la pantalla del televisor sin depender de hacks DOM.
+            // SOBERANO AIRPLAY 2 NATIVE SUBTITLE BRIDGE & ANTI-DUPLICIDAD:
             if (hlsPlayer) {
                 hlsPlayer.subtitleDisplay = false;
                 if (typeof hlsPlayer.subtitleTrack !== 'undefined') hlsPlayer.subtitleTrack = -1;
             }
             if (!videoEl || !videoEl.textTracks) return;
+
+            const overlayEl = document.getElementById('soberanoSubOverlay');
+            const isWirelessAirPlay = !!(videoEl.webkitCurrentPlaybackTargetIsWireless);
+
             if (isBurnedTorrent()) {
-                // Subtítulos ya quemados en los píxeles: desactivar cualquier pista de texto para no duplicar.
+                // Subtítulos ya quemados en los píxeles: silenciar absolutamente toda pista de texto y overlay DOM
                 for (let i = 0; i < videoEl.textTracks.length; i++) videoEl.textTracks[i].mode = 'disabled';
-                const ov = document.getElementById('soberanoSubOverlay');
-                if (ov) { ov.style.display = 'none'; ov.innerHTML = ''; }
+                if (overlayEl) {
+                    overlayEl.style.display = 'none';
+                    overlayEl.removeAttribute('data-active-text');
+                    overlayEl.innerHTML = '';
+                }
                 return;
             }
-            const isAppleWebKit = !window.webOS && !navigator.userAgent.includes('Web0S') && videoEl.canPlayType('application/vnd.apple.mpegurl');
-            const overlayEl = document.getElementById('soberanoSubOverlay');
 
             for (let i = 0; i < videoEl.textTracks.length; i++) {
                 const tr = videoEl.textTracks[i];
                 if (tr.language === 'es' || tr.label === 'Español' || tr.id === 'soberanoNativeEsTrack') {
                     if (subtitlesEnabled) {
-                        tr.mode = 'showing';
+                        // REGLA INMUTABLE ANTI-DUPLICIDAD:
+                        // Solo 'showing' si es transmisión inalámbrica AirPlay hacia una TV externa (donde no llega el DOM).
+                        // En la pantalla local (LG TV, iPad, Mac), la pista DEBE estar 'hidden' para que el motor
+                        // no pinte subtítulos dobles mientras `#soberanoSubOverlay` renderiza la pastilla oficial.
+                        tr.mode = isWirelessAirPlay ? 'showing' : 'hidden';
                     } else {
                         tr.mode = 'disabled';
                     }
                 }
             }
 
-            if (isAppleWebKit && subtitlesEnabled && overlayEl) {
-                // En Apple WebKit (iOS/iPadOS/macOS), AVPlayer nativo ya dibuja la pista WebVTT tanto en el teléfono
-                // como en el Smart TV LG vía AirPlay. Ocultar la capa DOM para evitar subtítulos duplicados o bloqueados en el móvil.
+            if (isWirelessAirPlay && subtitlesEnabled && overlayEl) {
+                // Al transmitir por AirPlay, la TV remota pinta el WebVTT nativo: ocultar overlay local
                 overlayEl.style.display = 'none';
                 overlayEl.removeAttribute('data-active-text');
                 overlayEl.innerHTML = '';
@@ -15233,8 +15251,13 @@ async function executeSoberanoSearch() {
     }
 }
 
+let currentSoberanoSeason = 1;
+let currentSoberanoEpisode = 1;
+let soberanoCachedVideos = [];
+
 async function openSoberanoSwarmModal(item, mediaType = 'movie') {
-    activeSoberanoItem = { ...item, mediaType: mediaType };
+    const isTv = mediaType === 'tv' || mediaType === 'series' || item.type === 'tv' || item.media_type === 'tv' || item.mediaType === 'tv' || !!item.season;
+    activeSoberanoItem = { ...item, mediaType: isTv ? 'tv' : 'movie' };
     const modal = document.getElementById('soberanoSwarmModal');
     const titleEl = document.getElementById('soberanoSwarmTitle');
     const bannerEl = document.getElementById('soberanoSwarmBanner');
@@ -15248,18 +15271,20 @@ async function openSoberanoSwarmModal(item, mediaType = 'movie') {
 
     if (titleEl) titleEl.textContent = title;
     if (bannerEl) bannerEl.src = banner;
-    if (typeBadge) typeBadge.textContent = mediaType === 'tv' ? '📺 Serie / Anime' : '🎬 Película';
+    if (typeBadge) typeBadge.textContent = isTv ? '📺 Serie / Anime' : '🎬 Película';
     if (countBadge) countBadge.textContent = 'Consultando enjambre...';
     if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted); padding:30px; text-align:center;"><i class="fa fa-spinner fa-spin fa-2x"></i><p style="margin-top:10px;">Consultando enjambre global de torrents...</p></div>';
 
     modal.classList.add('active');
 
     // Configuración del selector de Episodios si es Serie o Anime
-    if (mediaType === 'tv' && epBar) {
+    if (isTv && epBar) {
         epBar.style.display = 'block';
         initSoberanoSeasonEpisodeSelectors(item);
     } else if (epBar) {
         epBar.style.display = 'none';
+        currentSoberanoSeason = 1;
+        currentSoberanoEpisode = 1;
         loadSoberanoTorrentList(item.id, 'movie', 1, 1);
     }
 }
@@ -15271,86 +15296,108 @@ function closeSoberanoSwarmModal(e) {
 }
 
 async function initSoberanoSeasonEpisodeSelectors(item) {
-    const sSelect = document.getElementById('soberanoSeasonSelect');
-    const eSelect = document.getElementById('soberanoEpisodeSelect');
-    if (!sSelect || !eSelect) return;
+    const sTabs = document.getElementById('soberanoSeasonTabs');
+    const eTabs = document.getElementById('soberanoEpisodeTabs');
+    if (!sTabs || !eTabs) return;
 
-    sSelect.innerHTML = '';
-    eSelect.innerHTML = '';
+    sTabs.innerHTML = '<span style="font-size:12px; color:var(--text-muted);"><i class="fa fa-spinner fa-spin"></i> Cargando temporadas...</span>';
+    eTabs.innerHTML = '';
+    currentSoberanoSeason = 1;
+    currentSoberanoEpisode = 1;
 
-    // Consultar metadatos en Cinemeta para saber total de temporadas y episodios
-    try {
-        const resp = await fetch(`https://v3-cinemeta.strem.io/meta/series/${item.id}.json`);
-        const data = await resp.json();
-        const videos = (data && data.meta && Array.isArray(data.meta.videos)) ? data.meta.videos : [];
+    let seasonsList = [];
+    soberanoCachedVideos = [];
 
-        const seasonsSet = new Set();
-        videos.forEach(v => { if (v.season) seasonsSet.add(v.season); });
-        const seasons = Array.from(seasonsSet).sort((a, b) => a - b);
-
-        if (seasons.length === 0) seasons.push(1);
-
-        seasons.forEach(s => {
-            const opt = document.createElement('option');
-            opt.value = s;
-            opt.textContent = `Temporada ${s}`;
-            sSelect.appendChild(opt);
-        });
-
-        // Poblado de episodios para temporada 1
-        updateSoberanoEpisodeDropdown(videos, seasons[0]);
-
-        sSelect.onchange = () => {
-            const currentSeason = parseInt(sSelect.value, 10) || 1;
-            updateSoberanoEpisodeDropdown(videos, currentSeason);
-            onSoberanoSeasonEpisodeChange();
-        };
-
-        // Cargar torrents del episodio 1 temporada 1
-        loadSoberanoTorrentList(item.id, 'tv', seasons[0], 1);
-    } catch (e) {
-        // Fallback genérico: 5 temporadas, 24 episodios
-        for (let s = 1; s <= 5; s++) {
-            const opt = document.createElement('option');
-            opt.value = s;
-            opt.textContent = `Temporada ${s}`;
-            sSelect.appendChild(opt);
-        }
-        for (let ep = 1; ep <= 24; ep++) {
-            const opt = document.createElement('option');
-            opt.value = ep;
-            opt.textContent = `Episodio ${ep}`;
-            eSelect.appendChild(opt);
-        }
-        loadSoberanoTorrentList(item.id, 'tv', 1, 1);
+    // 1. Resolver IMDb ID si el ID es numérico de TMDB
+    let imdbId = item.imdb_id || item.id;
+    if (/^\d+$/.test(imdbId)) {
+        try {
+            const extResp = await fetch(`${PROXY_BASE}/api/tmdb/tv/${imdbId}/external_ids`);
+            if (extResp.ok) {
+                const extData = await extResp.json();
+                if (extData && extData.imdb_id) imdbId = extData.imdb_id;
+            }
+        } catch (e) {}
     }
+
+    // 2. Consultar Cinemeta para obtener la lista real de temporadas y episodios
+    if (imdbId && typeof imdbId === 'string' && imdbId.startsWith('tt')) {
+        try {
+            const resp = await fetch(`https://v3-cinemeta.strem.io/meta/series/${imdbId}.json`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const videos = (data && data.meta && Array.isArray(data.meta.videos)) ? data.meta.videos : [];
+                soberanoCachedVideos = videos;
+                const seasonsSet = new Set();
+                videos.forEach(v => { if (v.season && v.season > 0) seasonsSet.add(v.season); });
+                seasonsList = Array.from(seasonsSet).sort((a, b) => a - b);
+            }
+        } catch (e) {}
+    }
+
+    // 3. Fallback en caso de fallo de red
+    if (seasonsList.length === 0) {
+        seasonsList = [1, 2, 3, 4, 5];
+    }
+
+    // Renderizar Solapas de Temporadas (Apple HIG Season Tabs)
+    sTabs.innerHTML = '';
+    seasonsList.forEach(s => {
+        const btn = document.createElement('button');
+        btn.className = `season-tab ${s === currentSoberanoSeason ? 'active' : ''}`;
+        btn.type = 'button';
+        btn.tabIndex = 0;
+        btn.dataset.season = s;
+        btn.textContent = `Temporada ${s}`;
+        btn.onclick = () => selectSoberanoSeason(s, btn);
+        sTabs.appendChild(btn);
+    });
+
+    renderSoberanoEpisodeTabs(currentSoberanoSeason);
+    loadSoberanoTorrentList(item.id, 'tv', currentSoberanoSeason, currentSoberanoEpisode);
 }
 
-function updateSoberanoEpisodeDropdown(videos, targetSeason) {
-    const eSelect = document.getElementById('soberanoEpisodeSelect');
-    if (!eSelect) return;
-    eSelect.innerHTML = '';
+function selectSoberanoSeason(seasonNum, activeBtn) {
+    currentSoberanoSeason = seasonNum;
+    currentSoberanoEpisode = 1;
+    const sTabs = document.getElementById('soberanoSeasonTabs');
+    if (sTabs) {
+        sTabs.querySelectorAll('.season-tab').forEach(b => b.classList.remove('active'));
+    }
+    if (activeBtn) activeBtn.classList.add('active');
+    renderSoberanoEpisodeTabs(seasonNum);
+    loadSoberanoTorrentList(activeSoberanoItem.id, 'tv', currentSoberanoSeason, currentSoberanoEpisode);
+}
 
-    const epsInSeason = videos.filter(v => v.season === targetSeason);
+function renderSoberanoEpisodeTabs(seasonNum) {
+    const eTabs = document.getElementById('soberanoEpisodeTabs');
+    if (!eTabs) return;
+    eTabs.innerHTML = '';
+
+    const epsInSeason = soberanoCachedVideos.filter(v => v.season === seasonNum);
     const count = epsInSeason.length > 0 ? epsInSeason.length : 24;
 
-    for (let i = 1; i <= count; i++) {
-        const opt = document.createElement('option');
-        opt.value = i;
-        const vObj = epsInSeason.find(v => v.episode === i || v.number === i);
-        opt.textContent = `Episodio ${i}${vObj && vObj.name ? ': ' + vObj.name : ''}`;
-        eSelect.appendChild(opt);
+    for (let ep = 1; ep <= count; ep++) {
+        const btn = document.createElement('button');
+        btn.className = `season-tab ${ep === currentSoberanoEpisode ? 'active' : ''}`;
+        btn.type = 'button';
+        btn.tabIndex = 0;
+        btn.dataset.ep = ep;
+        const vObj = epsInSeason.find(v => v.episode === ep || v.number === ep);
+        btn.textContent = `Episodio ${ep}${vObj && vObj.name ? ': ' + vObj.name.slice(0, 24) : ''}`;
+        btn.onclick = () => selectSoberanoEpisode(ep, btn);
+        eTabs.appendChild(btn);
     }
 }
 
-function onSoberanoSeasonEpisodeChange() {
-    if (!activeSoberanoItem) return;
-    const sSelect = document.getElementById('soberanoSeasonSelect');
-    const eSelect = document.getElementById('soberanoEpisodeSelect');
-    const s = parseInt(sSelect ? sSelect.value : 1, 10) || 1;
-    const e = parseInt(eSelect ? eSelect.value : 1, 10) || 1;
-
-    loadSoberanoTorrentList(activeSoberanoItem.id, 'tv', s, e);
+function selectSoberanoEpisode(epNum, activeBtn) {
+    currentSoberanoEpisode = epNum;
+    const eTabs = document.getElementById('soberanoEpisodeTabs');
+    if (eTabs) {
+        eTabs.querySelectorAll('.season-tab').forEach(b => b.classList.remove('active'));
+    }
+    if (activeBtn) activeBtn.classList.add('active');
+    loadSoberanoTorrentList(activeSoberanoItem.id, 'tv', currentSoberanoSeason, currentSoberanoEpisode);
 }
 
 function renderSoberanoTorrentListFromCache() {
@@ -15380,29 +15427,39 @@ function renderSoberanoTorrentListFromCache() {
     displayStreams.forEach((stream) => {
         const originalIndex = activeSoberanoStreams.indexOf(stream);
         const isTopSeeds = originalIndex === 0 && stream.seeds > 10;
-        const seedBadgeClass = stream.seeds > 50 ? 'style="color:#30d158; font-weight:700;"' : (stream.seeds > 10 ? 'style="color:#0a84ff;"' : 'style="color:#ff9f0a;"');
+        const seedBadgeColor = stream.seeds > 50 ? '#30d158' : (stream.seeds > 10 ? '#0a84ff' : '#ff9f0a');
         const langIcon = stream.is_es ? '🇪🇸 Español' : (stream.is_dual ? '🌐 Dual Audio' : '🇺🇸 VO');
-        const qualityClass = stream.quality === '4K' ? 'style="background:rgba(217,70,239,0.25); color:#f0abfc; font-weight:800;"' : 'style="background:rgba(56,189,248,0.2); color:#38bdf8;"';
+        const qualityClass = stream.quality === '4K' ? 'style="background:rgba(217,70,239,0.25); color:#f0abfc; font-weight:800;"' : 'style="background:rgba(56,189,248,0.2); color:#38bdf8; font-weight:800;"';
+
+        const rawTitle = stream.title || stream.filename || 'Torrent';
+        const displayTracker = (stream.tracker || 'P2P').toUpperCase();
+        const releaseSource = stream.name || 'Torrentio';
 
         html += `
-            <div class="soberano-torrent-item" onclick="playSoberanoTorrent(${originalIndex})" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:12px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(217,70,239,0.12)'; this.style.borderColor='rgba(217,70,239,0.4)';" onmouseout="this.style.background='rgba(255,255,255,0.04)'; this.style.borderColor='rgba(255,255,255,0.08)';">
-                <div style="flex:1; margin-right:14px; min-width:0;">
-                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+            <div class="soberano-torrent-item" onclick="playSoberanoTorrent(${originalIndex})" style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; margin-bottom:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:14px; cursor:pointer; transition:all 0.2s; gap:16px;" onmouseover="this.style.background='rgba(217,70,239,0.12)'; this.style.borderColor='rgba(217,70,239,0.4)';" onmouseout="this.style.background='rgba(255,255,255,0.04)'; this.style.borderColor='rgba(255,255,255,0.08)';">
+                <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;">
+                    <!-- Fila 1: Badges de Estado (Calidad, Idioma, Seeds, Tamaño) -->
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                         <span class="meta-badge" ${qualityClass}>${stream.quality}</span>
                         ${stream.is_hdr ? '<span class="meta-badge" style="background:rgba(255,159,10,0.2); color:#ff9f0a; font-weight:700;">HDR / DV</span>' : ''}
                         <span class="meta-badge" style="background:rgba(255,255,255,0.08);">${langIcon}</span>
-                        <span class="meta-badge" ${seedBadgeClass}><i class="fa fa-users"></i> ${stream.seeds} seeds</span>
+                        <span class="meta-badge" style="background:rgba(48,209,88,0.15); color:${seedBadgeColor}; font-weight:700;"><i class="fa fa-users"></i> ${stream.seeds} seeds</span>
                         ${stream.size ? `<span class="meta-badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);"><i class="fa fa-hdd"></i> ${stream.size}</span>` : ''}
                         ${isTopSeeds ? '<span class="meta-badge" style="background:rgba(48,209,88,0.25); color:#30d158; font-weight:700;"><i class="fa fa-bolt"></i> Máxima Velocidad</span>' : ''}
                     </div>
-                    <div style="font-size:13px; font-weight:600; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(stream.title || stream.filename)}">
-                        ${escapeHtml(stream.title || stream.filename)}
+                    <!-- Fila 2: Nombre y Descripción completa del Archivo (Sin solapamientos, legible y fluido) -->
+                    <div style="font-size:13.5px; font-weight:600; color:#ffffff; line-height:1.4; word-break:break-word; max-height:44px; overflow:hidden; margin:5px 0 4px 0;" title="${escapeHtml(rawTitle)}">
+                        ${escapeHtml(rawTitle)}
                     </div>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                        ${escapeHtml(stream.tracker || 'P2P')} • ${stream.name || 'Torrentio'}
+                    <!-- Fila 3: Metadatos del Tracker y Servidor -->
+                    <div style="font-size:11.5px; color:rgba(255,255,255,0.5); display:flex; align-items:center; gap:8px;">
+                        <span><i class="fa fa-database"></i> ${escapeHtml(displayTracker)}</span>
+                        <span>•</span>
+                        <span><i class="fa fa-cloud"></i> ${escapeHtml(releaseSource)}</span>
                     </div>
                 </div>
-                <button class="btn-apple-primary" style="padding:8px 16px; font-size:13px; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; background:linear-gradient(135deg, #d946ef, #8b5cf6);">
+                <!-- Botón de Acción Limpio Apple HIG -->
+                <button class="btn-apple-primary" style="padding:10px 18px; font-size:13px; font-weight:700; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; border-radius:10px; background:linear-gradient(135deg, #d946ef, #8b5cf6); box-shadow:0 4px 12px rgba(217,70,239,0.3);">
                     <i class="fa fa-play"></i> RAM Play
                 </button>
             </div>
@@ -15435,11 +15492,13 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     activeEpisode = null;
     const activeHash = (torrentData.infoHash || (stream && stream.infoHash) || "").toLowerCase();
     const prevQuery = (currentTmdbPlaying && currentTmdbPlaying.hash === activeHash) ? currentTmdbPlaying.playQuery : (torrentData.__playQuery || null);
-    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0, hash: activeHash, burned: !!torrentData.burned, playQuery: prevQuery || torrentData.__playQuery || null };
-    subtitlesEnabled = !!torrentData.burned;
+    const isBurned = !!torrentData.burned;
+    currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0, hash: activeHash, burned: isBurned, playQuery: prevQuery || torrentData.__playQuery || null };
+    // REGLA SUPREMA ANTI-DUPLICIDAD: Si los subtítulos ya están quemados (burned) en el video, jamás habilitar overlays ni pistas
+    subtitlesEnabled = false;
     currentCustomSub = null;
     currentSubCues = [];
-    updateSubButtonsUI(subtitlesEnabled ? "on" : "off");
+    updateSubButtonsUI(isBurned ? "on" : "off");
     const type = item.media_type || (season ? "tv" : "movie");
     const s = season || 1;
     const e = episode || 1;
@@ -15479,28 +15538,24 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     ];
 
     currentServerIndex = 0;
-    showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]${torrentData.burned ? ' • subtítulos incrustados' : ''}`);
+    showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]${isBurned ? ' • subtítulos incrustados' : ''}`);
     executeTmdbDirectPlayback(0, 0);
-    if (!torrentData.burned) {
-        // Sin subtítulo incrustado (no hallado / respaldo): flujo clásico por pista de texto
+    if (!isBurned) {
         subtitlesEnabled = false;
-        autoSearchAndAnchorSpanishSub(0);
     }
 }
 
 async function playSoberanoTorrent(streamIdx) {
     if (!activeSoberanoItem || !activeSoberanoStreams || !activeSoberanoStreams[streamIdx]) return;
     const stream = activeSoberanoStreams[streamIdx];
-    const sSelect = document.getElementById("soberanoSeasonSelect");
-    const eSelect = document.getElementById("soberanoEpisodeSelect");
-    const s = parseInt(sSelect ? sSelect.value : 1, 10) || 1;
-    const e = parseInt(eSelect ? eSelect.value : 1, 10) || 1;
+    const s = parseInt(currentSoberanoSeason || 1, 10) || 1;
+    const e = parseInt(currentSoberanoEpisode || 1, 10) || 1;
 
     showToast(`⚡ Conectando con seeds P2P y preparando búfer RAM [${stream.quality}] (${stream.seeds} seeds)...`);
     closeSoberanoSwarmModal();
 
     const title = activeSoberanoItem.name || activeSoberanoItem.title || "";
-    const type = activeSoberanoItem.mediaType || "movie";
+    const type = activeSoberanoItem.mediaType || (activeSoberanoItem.season ? "tv" : "movie");
 
     const itemObj = {
         id: activeSoberanoItem.id,

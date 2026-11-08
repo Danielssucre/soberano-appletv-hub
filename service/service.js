@@ -2392,6 +2392,7 @@ const server = http.createServer(async (req, res) => {
             const daemonRes = await fetchJson(daemonUrl, {}, 35000);
             if (daemonRes && daemonRes.status === 'ok') {
                 const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
+                if (daemonRes.burned) BURNED_HASHES[cleanHash] = true; else delete BURNED_HASHES[cleanHash];
                 const targetM3u8 = `${reqProto}://${reqHost}/api/torrent/hls/${cleanHash}/index.m3u8`;
                 res.writeHead(302, {
                     'Location': targetM3u8,
