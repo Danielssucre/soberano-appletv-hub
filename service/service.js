@@ -2118,10 +2118,15 @@ function parseTorrentStream(stream) {
     const trackerMatch = rawTitle.match(/⚙️\s*([^\n]+)/);
     const tracker = trackerMatch ? trackerMatch[1].trim() : '';
 
-    // Detección de Idioma (Español Latino / Castellano / Multi / Dual)
-    const isEs = /🇪🇸|🇲🇽|\b(spa|latino|castellano|spanish|es|espanol|español|audio latino|subtitulado|cinecalidad|mejortorrent|wolfmax4k|besttorrents)\b/i.test(rawTitle) ||
+    // Detección estricta de Idioma de AUDIO (ignorar filas multi-bandera de subtítulos de Torrentio como "🇬🇧 / 🇯🇵 / ... / 🇪🇸")
+    const titleLines = rawTitle.split('\n').filter(function(ln) {
+        const flagMatches = ln.match(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/g) || [];
+        return flagMatches.length < 3;
+    });
+    const audioContext = titleLines.join(' ').replace(/\b(subtitulado|subtitles|multi[- ]?subs?|esubs?|subs?)\b/gi, ' ');
+    const isEs = /🇪🇸|🇲🇽|\b(spa|esp|latino|castellano|spanish|espanol|español|audio latino|cinecalidad|mejortorrent|wolfmax4k|besttorrents)\b/i.test(audioContext) ||
                  /cinecalidad|mejortorrent|wolfmax4k|besttorrents/i.test(tracker);
-    const isDual = /\b(dual|multi|multi-audio|multi-subs|dub|tri-audio)\b/i.test(rawTitle);
+    const isDual = /\b(dual|multi|multi-audio|dub|tri-audio)\b/i.test(audioContext);
 
     // Detección de HDR / Dolby Vision
     const isHdr = /\b(hdr|hdr10|hdr10\+|dv|dolby vision)\b/i.test(rawTitle) || /\b(hdr|dv)\b/i.test(name);
@@ -2479,9 +2484,10 @@ const server = http.createServer(async (req, res) => {
             // transmite el video. La única forma universal es incrustar el texto en los píxeles del video
             // (igual que los proveedores Cuevana), generado en el Mac M3 con overlay de ffmpeg.
             const wantBurn = parsed.query.burn !== '0';
+            const forceSub = parsed.query.force_sub === '1';
             const subOff = parseFloat(parsed.query.off || '0') || 0;
             let burnSubUrl = '';
-            if (wantBurn && !isEs) {
+            if (wantBurn && (!isEs || forceSub)) {
                 try {
                     const subRes = await Promise.race([
                         resolveAutoSpanishSubtitle({ id: id, type: type, s: s, e: e, title: title, hash: infoHash }, reqHost, reqProto),

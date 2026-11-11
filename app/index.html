@@ -11826,8 +11826,15 @@
             return false;
         }
 
+        function isLocalDomSubModeForTorrent() {
+            return !!(window.webOS || navigator.userAgent.includes('Web0S') || (video && !video.canPlayType('application/vnd.apple.mpegurl')));
+        }
+
         function onAutoSubPillClick() {
-            if (isSoberanoTorrentPlaying()) { reloadSoberanoVariant(!isBurnedTorrent(), 'toggle'); return; }
+            if (isSoberanoTorrentPlaying()) {
+                if (isBurnedTorrent()) { reloadSoberanoVariant(false, 'toggle'); return; }
+                if (!isLocalDomSubModeForTorrent() && !subtitlesEnabled) { reloadSoberanoVariant(true, 'toggle'); return; }
+            }
             if (!subtitlesEnabled) {
                 if (currentSubCues && currentSubCues.length > 0) {
                     subtitlesEnabled = true;
@@ -11850,7 +11857,10 @@
         }
 
         function toggleSubtitles() {
-            if (isSoberanoTorrentPlaying()) { reloadSoberanoVariant(!isBurnedTorrent(), 'toggle'); return; }
+            if (isSoberanoTorrentPlaying()) {
+                if (isBurnedTorrent()) { reloadSoberanoVariant(false, 'toggle'); return; }
+                if (!isLocalDomSubModeForTorrent() && !subtitlesEnabled) { reloadSoberanoVariant(true, 'toggle'); return; }
+            }
             if (!subtitlesEnabled) {
                 // El usuario presionó el botón para ACTIVAR subtítulos:
                 // Si aún no se han descargado, buscarlos y anclarlos automáticamente en español
@@ -12408,13 +12418,13 @@
 
             // SOBERANO SUBTITLES ENGINE: Renderizado DOM prioritario en pantalla de TV
             const subOverlay = document.getElementById('soberanoSubOverlay');
-            if (!subtitlesEnabled) {
+            if (!subtitlesEnabled || isBurnedTorrent()) {
                 if (subOverlay && subOverlay.style.display !== 'none') {
                     subOverlay.style.display = 'none';
                     subOverlay.removeAttribute('data-active-text');
                     subOverlay.innerHTML = '';
                 }
-            } else if (subtitlesEnabled && currentSubCues && currentSubCues.length > 0 && subOverlay) {
+            } else if (subtitlesEnabled && !isBurnedTorrent() && currentSubCues && currentSubCues.length > 0 && subOverlay) {
                 const activeCue = currentSubCues.find(c => cur >= c.start && cur <= c.end);
                 if (activeCue) {
                     if (subOverlay.getAttribute('data-active-text') !== activeCue.text) {
@@ -14930,30 +14940,34 @@
             __burnReloading = true;
             const keepT = video ? (video.currentTime || 0) : 0;
             try {
-                showToast(burn ? '💬 Incrustando subtítulos en el video…' : '💬 Quitando subtítulos del video…');
-                const url = `${currentTmdbPlaying.playQuery}&burn=${burn ? 1 : 0}&off=${currentSubSyncOffset || 0}`;
+                showToast(burn ? '💬 Activando subtítulos en español…' : '💬 Desactivando subtítulos del video…');
+                let baseQuery = currentTmdbPlaying.playQuery;
+                if (burn) {
+                    baseQuery = baseQuery.replace(/&is_es=1\b/g, '&is_es=0') + '&force_sub=1';
+                }
+                const url = `${baseQuery}&burn=${burn ? 1 : 0}&off=${currentSubSyncOffset || 0}`;
                 const resp = await fetch(url, { cache: 'no-store' });
                 const data = await resp.json();
                 if (!data || data.status !== 'ok' || !data.direct_stream_url) throw new Error((data && data.message) || 'sin respuesta');
                 currentTmdbPlaying.burned = !!data.burned;
-                subtitlesEnabled = !!data.burned;
-                updateSubButtonsUI(subtitlesEnabled ? 'on' : 'off');
+                subtitlesEnabled = false;
+                updateSubButtonsUI(data.burned ? 'on' : 'off');
                 renderActiveSubCueNow();
                 enforceSpanishTracks(video);
                 directServersQueue[0].url = data.direct_stream_url;
                 tmdbDirectStreamUrl = data.direct_stream_url;
-                video.src = data.direct_stream_url;
-                const onMeta = () => {
-                    video.removeEventListener('loadedmetadata', onMeta);
-                    if (keepT > 1) { try { video.currentTime = keepT; } catch (e) {} }
-                    video.play().catch(() => {});
-                };
-                video.addEventListener('loadedmetadata', onMeta);
-                video.play().catch(() => {});
-                if (burn && !data.burned) showToast('⚠️ No se encontró subtítulo en español para este torrent');
+                await executeTmdbDirectPlayback(0, keepT);
+                if (burn && !data.burned) {
+                    // Fallback limpio a overlay DOM instantáneo si no se quemaron en el video
+                    autoSearchAndAnchorSpanishSub(0);
+                }
             } catch (eRel) {
                 console.warn('[BURN] reload falló:', eRel);
-                showToast('⚠️ No se pudo cambiar los subtítulos: ' + (eRel.message || eRel));
+                if (burn) {
+                    autoSearchAndAnchorSpanishSub(0);
+                } else {
+                    showToast('⚠️ No se pudo cambiar los subtítulos: ' + (eRel.message || eRel));
+                }
             }
             __burnReloading = false;
         }
@@ -15015,6 +15029,8 @@
                     } else {
                         tr.mode = 'disabled';
                     }
+                } else if (!isWirelessAirPlay) {
+                    tr.mode = 'disabled';
                 }
             }
 
@@ -15541,7 +15557,14 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     showToast(`🍿 Reproduciendo Torrent P2P en RAM [${stream ? stream.quality : "1080p"}]${isBurned ? ' • subtítulos incrustados' : ''}`);
     executeTmdbDirectPlayback(0, 0);
     if (!isBurned) {
-        subtitlesEnabled = false;
+        const isPureEsAudio = !!(stream && stream.is_es && !stream.is_dual);
+        if (!isPureEsAudio) {
+            // Sin subtítulos quemados y audio no exclusivamente español: anclar subtítulos en español sin duplicidad
+            autoSearchAndAnchorSpanishSub(0);
+        } else {
+            subtitlesEnabled = false;
+            updateSubButtonsUI('off');
+        }
     }
 }
 
@@ -15568,9 +15591,10 @@ async function playSoberanoTorrent(streamIdx) {
     };
 
     try {
-        const isEsParam = (stream.is_es || stream.is_dual) ? '1' : '0';
+        const isEsParam = (stream.is_es && !stream.is_dual) ? '1' : '0';
+        const wantBurnOnStart = isLocalDomSubModeForTorrent() ? 0 : 1;
         const baseQ = `${PROXY_BASE}/api/soberano/play?id=${encodeURIComponent(activeSoberanoItem.id || "")}&hash=${encodeURIComponent(stream.infoHash || "")}&idx=${stream.fileIdx !== undefined ? stream.fileIdx : -1}&title=${encodeURIComponent(title)}&type=${type}&s=${s}&e=${e}&is_es=${isEsParam}&quality=${encodeURIComponent(stream.quality || "1080p")}&seeds=${stream.seeds || 0}`;
-        const qUrl = `${baseQ}&burn=1&off=${currentSubSyncOffset || 0}`;
+        const qUrl = `${baseQ}&burn=${wantBurnOnStart}&off=${currentSubSyncOffset || 0}`;
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 60000);
         const resp = await fetch(qUrl, { signal: ctrl.signal });
