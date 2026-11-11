@@ -1171,6 +1171,25 @@
             transform: translate(-50%, -50%) scale(1);
         }
 
+        .scrubber-container:focus {
+            outline: none;
+        }
+        .scrubber-container:focus .scrubber-track {
+            height: 9px;
+            background: rgba(255, 255, 255, 0.35);
+        }
+        .scrubber-container:focus .scrubber-thumb {
+            transform: translate(-50%, -50%) scale(1.35);
+            background: #ffffff;
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.95);
+        }
+
+        .btn-ctrl.btn-seek {
+            padding: 9px 13px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
         /* Toolbar Row with Standard Buttons */
         .controls-toolbar {
             display: flex;
@@ -4035,7 +4054,7 @@
                 <!-- Bottom Controls Bar -->
                 <div class="player-bottom-controls">
                     <!-- Dual-Track Scrubber with Subtle RAM Indicator -->
-                    <div class="scrubber-container" id="scrubberContainer" onclick="seekScrubber(event)">
+                    <div class="scrubber-container" id="scrubberContainer" tabindex="0" onclick="seekScrubber(event)">
                         <div class="scrubber-track">
                             <div class="scrubber-ram-fill" id="ramScrubberFill" title="Búfer RAM"></div>
                             <div class="scrubber-play-fill" id="playScrubberFill"></div>
@@ -4046,9 +4065,21 @@
                     <!-- Button Controls (Clean Apple TV Layout) -->
                     <div class="controls-toolbar">
                         <div class="left-controls">
+                            <!-- Retroceder 10s -->
+                            <button class="btn-ctrl btn-seek" id="btnRewind10" onclick="seekRelative(-10); showToast('⏪ -10s');" title="Retroceder 10 segundos">
+                                <i class="fa fa-rotate-left"></i> <span class="btn-text">-10s</span>
+                            </button>
+
+                            <!-- Play / Pause -->
                             <button class="btn-ctrl play-pause" id="btnPlayPause" onclick="togglePlayPause()">
                                 <i class="fa fa-play" id="playIcon"></i> <span id="playBtnText" class="btn-text">Reproducir</span>
                             </button>
+
+                            <!-- Adelantar 10s -->
+                            <button class="btn-ctrl btn-seek" id="btnForward10" onclick="seekRelative(10); showToast('⏩ +10s');" title="Adelantar 10 segundos">
+                                <i class="fa fa-rotate-right"></i> <span class="btn-text">+10s</span>
+                            </button>
+
                             <div class="time-display" id="timeDisplay">0:00 / 0:00</div>
                         </div>
 
@@ -12402,14 +12433,22 @@
             handlePlayerUserActivity();
         });
 
+        function updateScrubberUi(cur, dur) {
+            if (!dur || dur <= 0 || !isFinite(dur)) return;
+            const pct = Math.max(0, Math.min(100, (cur / dur) * 100));
+            const fill = document.getElementById('playScrubberFill');
+            if (fill) fill.style.width = `${pct}%`;
+            const thumb = document.getElementById('scrubberThumb');
+            if (thumb) thumb.style.left = `${pct}%`;
+            const timeDisp = document.getElementById('timeDisplay');
+            if (timeDisp) timeDisp.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+        }
+
         video.addEventListener('timeupdate', () => {
-            if (!video.duration) return;
+            if (!video.duration || !isFinite(video.duration)) return;
             const cur = video.currentTime;
             const dur = video.duration;
-            const pct = (cur / dur) * 100;
-            document.getElementById('playScrubberFill').style.width = `${pct}%`;
-            document.getElementById('scrubberThumb').style.left = `${pct}%`;
-            document.getElementById('timeDisplay').textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+            updateScrubberUi(cur, dur);
 
             // Guardar progreso cada 5 segundos
             if (Math.floor(cur) % 5 === 0 && activeAnime && activeEpisode) {
@@ -12445,15 +12484,23 @@
         });
 
         function seekScrubber(e) {
-            if (serverMode === 'iframe' || !video.duration) return;
+            if (serverMode === 'iframe' || !video) return;
+            const dur = video.duration && isFinite(video.duration) ? video.duration : (video.seekable && video.seekable.length > 0 ? video.seekable.end(video.seekable.length - 1) : 0);
+            if (!dur || dur <= 0) return;
             const rect = document.getElementById('scrubberContainer').getBoundingClientRect();
-            const clickPos = (e.clientX - rect.left) / rect.width;
-            video.currentTime = clickPos * video.duration;
+            const clickPos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            const target = clickPos * dur;
+            video.currentTime = target;
+            updateScrubberUi(target, dur);
         }
 
         function seekRelative(seconds) {
-            if (serverMode === 'iframe') return;
-            video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
+            if (serverMode === 'iframe' || !video) return;
+            const dur = video.duration && isFinite(video.duration) ? video.duration : (video.seekable && video.seekable.length > 0 ? video.seekable.end(video.seekable.length - 1) : 0);
+            const cur = video.currentTime || 0;
+            const target = dur > 0 ? Math.max(0, Math.min(dur, cur + seconds)) : Math.max(0, cur + seconds);
+            video.currentTime = target;
+            if (dur > 0) updateScrubberUi(target, dur);
         }
 
         function formatTime(sec) {
@@ -13332,6 +13379,35 @@
                     const osd = document.getElementById('playerOSD');
                     const isOsdHidden = osd && osd.classList.contains('hidden');
 
+                    // Teclas multimedia dedicadas de webOS / LG Magic Remote
+                    if (e.keyCode === 412) { // MediaRewind (<<)
+                        e.preventDefault();
+                        seekRelative(-10);
+                        showToast('⏪ -10s');
+                        handlePlayerUserActivity();
+                        return;
+                    } else if (e.keyCode === 417) { // MediaFastForward (>>)
+                        e.preventDefault();
+                        seekRelative(10);
+                        showToast('⏩ +10s');
+                        handlePlayerUserActivity();
+                        return;
+                    } else if (e.keyCode === 415) { // MediaPlay
+                        e.preventDefault();
+                        if (video) video.play();
+                        handlePlayerUserActivity();
+                        return;
+                    } else if (e.keyCode === 19) { // MediaPause
+                        e.preventDefault();
+                        if (video) video.pause();
+                        handlePlayerUserActivity();
+                        return;
+                    } else if (e.keyCode === 413) { // MediaStop
+                        e.preventDefault();
+                        closePlayer();
+                        return;
+                    }
+
                     // Canales Ch+ / Ch- en el control remoto para cambiar de episodio directamente
                     if (e.keyCode === 33) {
                         e.preventDefault();
@@ -13349,24 +13425,56 @@
                         if (e.keyCode === 37) { // Flecha izquierda: retroceder 10s
                             seekRelative(-10);
                             showToast('⏪ -10s');
+                            handlePlayerUserActivity();
+                            const rBtn = document.getElementById('btnRewind10');
+                            if (rBtn) SpatialNav.focusElement(rBtn);
+                            return;
                         } else if (e.keyCode === 39) { // Flecha derecha: avanzar 10s
                             seekRelative(10);
                             showToast('⏩ +10s');
+                            handlePlayerUserActivity();
+                            const fBtn = document.getElementById('btnForward10');
+                            if (fBtn) SpatialNav.focusElement(fBtn);
+                            return;
                         } else if (e.keyCode === 13 || e.key === ' ') { // OK / PlayPause
                             togglePlayPause();
+                            handlePlayerUserActivity();
+                            const pBtn = document.getElementById('btnPlayPause');
+                            if (pBtn) SpatialNav.focusElement(pBtn);
+                            return;
+                        } else if (e.keyCode === 38 || e.keyCode === 40) {
+                            handlePlayerUserActivity();
+                            const pBtn = document.getElementById('btnPlayPause');
+                            if (pBtn) SpatialNav.focusElement(pBtn);
+                            return;
                         }
-                        // Despertar el OSD y enfocar el botón principal
-                        handlePlayerUserActivity();
-                        const pBtn = document.getElementById('btnPlayPause');
-                        if (pBtn) SpatialNav.focusElement(pBtn);
-                        return;
                     }
 
                     // Si el OSD está visible, reiniciar el temporizador de auto-ocultación
                     handlePlayerUserActivity();
 
+                    // Si la barra de progreso (scrubber) está enfocada:
+                    if (document.activeElement && document.activeElement.id === 'scrubberContainer') {
+                        if (e.keyCode === 37) { // Flecha izquierda: retroceder 15s
+                            e.preventDefault();
+                            seekRelative(-15);
+                            showToast('⏪ -15s');
+                            return;
+                        } else if (e.keyCode === 39) { // Flecha derecha: avanzar 15s
+                            e.preventDefault();
+                            seekRelative(15);
+                            showToast('⏩ +15s');
+                            return;
+                        } else if (e.keyCode === 40) { // Flecha abajo: bajar al botón Play
+                            e.preventDefault();
+                            const pBtn = document.getElementById('btnPlayPause');
+                            if (pBtn) SpatialNav.focusElement(pBtn);
+                            return;
+                        }
+                    }
+
                     // Si el foco está en un botón interactivo del reproductor, permitir navegar entre ellos
-                    const playerControls = Array.from(document.querySelectorAll('#playerModal .btn-ctrl, #playerModal .btn-close-player'));
+                    const playerControls = Array.from(document.querySelectorAll('#playerModal .btn-ctrl, #playerModal .btn-close-player, #playerModal .scrubber-container'));
                     const isControlFocused = playerControls.includes(document.activeElement);
 
                     if (isControlFocused) {
@@ -13378,7 +13486,7 @@
                             e.preventDefault();
                             SpatialNav.navigate('right');
                             return;
-                        } else if (e.keyCode === 38) { // Flecha arriba: subir al botón cerrar
+                        } else if (e.keyCode === 38) { // Flecha arriba: subir al scrubber o al botón cerrar
                             e.preventDefault();
                             SpatialNav.navigate('up');
                             return;
@@ -13425,23 +13533,40 @@
                             document.activeElement.click();
                         }
                         break;
+                    case 412: // MediaRewind (<<) en control remoto LG
+                        e.preventDefault();
+                        if (isPlayer) {
+                            seekRelative(-10);
+                            showToast('⏪ -10s');
+                            handlePlayerUserActivity();
+                        }
+                        break;
+                    case 417: // MediaFastForward (>>) en control remoto LG
+                        e.preventDefault();
+                        if (isPlayer) {
+                            seekRelative(10);
+                            showToast('⏩ +10s');
+                            handlePlayerUserActivity();
+                        }
+                        break;
                     case 415: // MediaPlay
                         if (isPlayer && video) video.play();
                         break;
                     case 19: // MediaPause
                         if (isPlayer && video) video.pause();
                         break;
+                    case 413: // MediaStop
+                        if (isPlayer) closePlayer();
+                        break;
                     case 403: // Botón Rojo webOS: Atrasar subtítulos -0.5s
                         e.preventDefault();
                         if (isPlayer) adjustSubSync(-0.5);
                         break;
-                    case 404:
-                    case 413: // Botón Verde webOS: Resetear Sincronización a 0s
+                    case 404: // Botón Verde webOS: Resetear Sincronización a 0s
                         e.preventDefault();
                         if (isPlayer) setSubSyncOffset(0.0);
                         break;
-                    case 405:
-                    case 417: // Botón Amarillo webOS: Alternar Subtítulos ON/OFF
+                    case 405: // Botón Amarillo webOS: Alternar Subtítulos ON/OFF
                         e.preventDefault();
                         if (isPlayer) toggleSubtitles();
                         break;

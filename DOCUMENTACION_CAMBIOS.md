@@ -174,7 +174,32 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 7. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 7. Controles Nativos de Adelanto y Retroceso (Rewind/Fast-Forward) y Teclas del Mando LG
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`btnRewind10`, `btnForward10`, `scrubberContainer`, `updateScrubberUi`, `seekRelative`, `keydown`)
+
+### 🎯 ¿Para qué sirve?
+* Añade botones físicos de **Atrasar 10s (`⏪ -10s`)** y **Adelantar 10s (`⏩ +10s`)** en la barra del reproductor estilo Apple TV, permitiendo adelantar o retroceder el video con un solo clic o con el Magic Remote de LG.
+* Mapea correctamente las teclas multimedia físicas del control remoto de la TV (`<<` y `>>`), eliminando el conflicto donde la tecla `>>` activaba o desactivaba subtítulos en lugar de adelantar el video.
+* Permite enfocar y explorar la barra de progreso (`scrubber`) con la cruceta (D-pad) del control remoto para saltos de 15 segundos.
+
+### ⚙️ ¿Cómo funciona?
+1. **Botones de Navegación Rápida (`[⏪ -10s]` y `[⏩ +10s]`):**
+   * Integrados en `.left-controls` flanqueando el botón central de Play/Pause:
+     `[⏪ -10s]` $\longleftrightarrow$ `[ ▶ Reproducir ]` $\longleftrightarrow$ `[⏩ +10s]`.
+   * Al pulsar con el puntero o pulsar Enter con el control remoto, invocan `seekRelative(±10)` actualizando de inmediato la barra de progreso y mostrando el aviso en pantalla.
+2. **Corrección de Códigos del Mando LG webOS:**
+   * **`412` (`KEY_REWIND` / `<<`):** Retrocede 10 segundos al instante.
+   * **`417` (`KEY_FAST_FWD` / `>>`):** Adelanta 10 segundos al instante (anteriormente estaba asignado por error a alternar subtítulos).
+   * **`413` (`KEY_STOP`):** Cierra el reproductor limpiamente.
+   * **`405` (Botón Amarillo):** Alterna subtítulos ON/OFF.
+3. **Navegación Espacial en el Scrubber (`tabindex="0"`):**
+   * Al pulsar Flecha Arriba desde los controles, el foco sube a la barra de progreso; las flechas Izquierda/Derecha permiten retroceder o adelantar en tramos de 15 segundos, y Flecha Abajo regresa al botón de Reproducir.
+
+---
+
+## 8. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash
