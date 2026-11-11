@@ -21,9 +21,19 @@ const os = require('os');
 // 1. webOS Luna Service Bridge Registration
 let service = null;
 try {
+    if (process.argv.indexOf('--disable-timeouts') === -1) {
+        process.argv.push('--disable-timeouts');
+    }
     const Service = require('webos-service');
     service = new Service('com.soberano.appletvhub.service');
-    console.log('[SOBERANO_SERVICE] Registered with webOS Service Bus');
+    if (service.activityManager) {
+        service.activityManager.exitOnTimeout = false;
+        service.activityManager.idleTimeout = 86400;
+        try {
+            service.activityManager.create('soberanoPermanentActivity', function() {});
+        } catch (eAct) {}
+    }
+    console.log('[SOBERANO_SERVICE] Registered with webOS Service Bus (Permanent Activity Lock Active)');
 
     service.register('heartbeat', (message) => {
         message.respond({

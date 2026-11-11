@@ -19,9 +19,11 @@ const GEN_SUB_PY = path.join(path.dirname(new URL(import.meta.url).pathname), 'g
 const FFMPEG_BIN = fs.existsSync('/opt/homebrew/bin/ffmpeg') ? '/opt/homebrew/bin/ffmpeg' : 'ffmpeg';
 const FFPROBE_BIN = fs.existsSync('/opt/homebrew/bin/ffprobe') ? '/opt/homebrew/bin/ffprobe' : 'ffprobe';
 
-// Bounded RAM Ring-Buffer Chunk Store (Max ~320 MB RAM per active torrent - Jetsam Guard)
-const MAX_RAM_STORE_BYTES = 320 * 1024 * 1024;
+// Bounded RAM Ring-Buffer Chunk Store with Reader-Aware Eviction & Ephemeral /tmp Spillover
+// Guarantees <= 512 MB RAM (Jetsam Guard) AND 0% premature EOF ("Chunk not found") on multi-GB episodes/movies.
+const MAX_RAM_STORE_BYTES = 512 * 1024 * 1024;
 const PINNED_HEAD_CHUNKS = 1024; // ~16 MB initial header chunks pinned in RAM
+const SPILL_BASE_DIR = '/tmp/soberano_chunks';
 
 class BoundedRamChunkStore {
     constructor(chunkLength, opts = {}) {
@@ -30,7 +32,10 @@ class BoundedRamChunkStore {
         this.chunks = new Map();
         this.fifoQueue = [];
         this.usedBytes = 0;
+        this.lastReadIndex = 0;
         this.closed = false;
+        this.storeId = crypto.randomBytes(6).toString('hex');
+        this.spillDir = path.join(SPILL_BASE_DIR, this.storeId);
         this.length = Number(opts.length) || Infinity;
         if (this.length !== Infinity) {
             this.lastChunkLength = (this.length % this.chunkLength) || this.chunkLength;
@@ -56,11 +61,27 @@ class BoundedRamChunkStore {
         }
         this.chunks.set(index, buf);
 
-        // Evict oldest non-pinned chunks if RAM window exceeds 320 MB
+        // Evict when RAM window exceeds 512 MB:
+        // 1) Evict already-read chunks (oldIdx < this.lastReadIndex - 32) purely from RAM.
+        // 2) If an unread future chunk must leave RAM, spill it to /tmp/soberano_chunks so FFmpeg NEVER hits EOF!
         while (this.usedBytes > MAX_RAM_STORE_BYTES && this.fifoQueue.length > 0) {
-            const oldIdx = this.fifoQueue.shift();
+            let victimPos = 0;
+            const safeReadCutoff = Math.max(PINNED_HEAD_CHUNKS, this.lastReadIndex - 32);
+            for (let i = 0; i < this.fifoQueue.length; i++) {
+                if (this.fifoQueue[i] < safeReadCutoff) {
+                    victimPos = i;
+                    break;
+                }
+            }
+            const oldIdx = this.fifoQueue.splice(victimPos, 1)[0];
             const oldBuf = this.chunks.get(oldIdx);
             if (oldBuf) {
+                if (oldIdx >= safeReadCutoff) {
+                    try {
+                        fs.mkdirSync(this.spillDir, { recursive: true });
+                        fs.writeFileSync(path.join(this.spillDir, `${oldIdx}.chunk`), oldBuf);
+                    } catch (eSpill) {}
+                }
                 this.usedBytes -= oldBuf.length;
                 this.chunks.delete(oldIdx);
             }
@@ -73,7 +94,21 @@ class BoundedRamChunkStore {
         if (typeof opts === 'function') return this.get(index, null, opts);
         if (this.closed) return queueMicrotask(() => cb(new Error('Storage is closed')));
 
+        if (index > PINNED_HEAD_CHUNKS && index >= this.lastReadIndex && index - this.lastReadIndex < 256) {
+            this.lastReadIndex = index;
+        } else if (this.lastReadIndex === 0 && index > 0 && index < 512) {
+            this.lastReadIndex = index;
+        }
+
         let buf = this.chunks.get(index);
+        if (!buf) {
+            const spillFile = path.join(this.spillDir, `${index}.chunk`);
+            if (fs.existsSync(spillFile)) {
+                try {
+                    buf = fs.readFileSync(spillFile);
+                } catch (eRead) {}
+            }
+        }
         if (!buf) {
             const err = new Error('Chunk not found in RAM window');
             err.notFound = true;
@@ -95,6 +130,7 @@ class BoundedRamChunkStore {
         this.chunks.clear();
         this.fifoQueue = [];
         this.usedBytes = 0;
+        try { fs.rmSync(this.spillDir, { recursive: true, force: true }); } catch (e) {}
         queueMicrotask(() => cb(null));
     }
 
@@ -115,18 +151,24 @@ const TRACKERS = [
     // al destruir el torrent y tumbaban el daemon (RTCError: User-Initiated Abort).
 ];
 
-// Guardia de proceso: un peer roto jamás debe tumbar el daemon completo.
+// Guardia de proceso: un peer roto jamás debe tumbar el daemon completo, pero si el puerto ya está en uso (EADDRINUSE), salir limpiamente.
 process.on('uncaughtException', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+        console.error('[SOBERANO_DAEMON] Puerto en uso (EADDRINUSE), terminando instancia duplicada.');
+        process.exit(1);
+    }
     console.warn('[SOBERANO_DAEMON] Excepción no capturada (daemon sigue vivo):', err && (err.code || ''), err && err.message);
 });
 process.on('unhandledRejection', (reason) => {
     console.warn('[SOBERANO_DAEMON] Promesa rechazada sin manejar (daemon sigue vivo):', reason && reason.message ? reason.message : reason);
 });
 
-// Clean HLS base directory on startup
+// Clean HLS & spill base directories on startup
 try {
     fs.rmSync(HLS_BASE_DIR, { recursive: true, force: true });
     fs.mkdirSync(HLS_BASE_DIR, { recursive: true });
+    fs.rmSync(SPILL_BASE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SPILL_BASE_DIR, { recursive: true });
 } catch (e) {}
 
 const client = new WebTorrent({
@@ -165,8 +207,11 @@ function cleanupHlsSession(hashToClean = null) {
 function resetActiveTimer() {
     if (activeTorrentTimer) clearTimeout(activeTorrentTimer);
     activeTorrentTimer = setTimeout(async () => {
+        if (activeHlsSession && activeHlsSession.ffmpegProc && activeHlsSession.ffmpegProc.exitCode === null) {
+            return resetActiveTimer();
+        }
         if (activeTorrentHash) {
-            console.log(`[SOBERANO_DAEMON] Inactividad superada (20m): purgando torrent ${activeTorrentHash} de RAM`);
+            console.log(`[SOBERANO_DAEMON] Inactividad superada (180m): purgando torrent ${activeTorrentHash} de RAM`);
             cleanupHlsSession(activeTorrentHash);
             try {
                 const t = await client.get(activeTorrentHash);
@@ -174,7 +219,7 @@ function resetActiveTimer() {
             } catch (e) {}
             activeTorrentHash = null;
         }
-    }, 20 * 60 * 1000);
+    }, 180 * 60 * 1000);
 }
 
 function probeStreamStreams(rawStreamUrl) {
@@ -308,6 +353,10 @@ async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = fal
 
     const ffmpegArgs = concatPath ? [
         '-loglevel', 'error',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
         '-seekable', '0',
         '-analyzeduration', '1000000',
         '-probesize', '1000000',
@@ -334,6 +383,10 @@ async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = fal
         m3u8Path
     ] : [
         '-loglevel', 'error',
+        '-reconnect', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
         '-seekable', '0',
         '-analyzeduration', '1000000',
         '-probesize', '1000000',
@@ -433,7 +486,7 @@ const myServer = http.createServer(async (req, res) => {
 
         if (!fs.existsSync(fullPath) && activeHlsSession && rel.startsWith(activeHlsSession.infoHash)) {
             const waitStart = Date.now();
-            while (Date.now() - waitStart < 12000) {
+            while (Date.now() - waitStart < 25000) {
                 if (fs.existsSync(fullPath)) {
                     try {
                         if (fs.statSync(fullPath).size > (isM3u8 ? 40 : 512)) break;

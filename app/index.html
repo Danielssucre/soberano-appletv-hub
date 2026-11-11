@@ -12498,6 +12498,29 @@
 
         // Navegación de Episodios Estilo Apple TV (Siguiente / Anterior)
         function playAdjacentEpisode(offset) {
+            if (!activeAnime && currentTmdbPlaying && currentTmdbPlaying.item) {
+                const cItem = currentTmdbPlaying.item;
+                const isTv = currentTmdbPlaying.season || cItem.media_type === 'tv' || cItem.first_air_date;
+                if (isTv) {
+                    const nextEpNum = (currentTmdbPlaying.episode || 1) + offset;
+                    if (nextEpNum >= 1) {
+                        const curSeason = currentTmdbPlaying.season || 1;
+                        currentTmdbPlaying.episode = nextEpNum;
+                        if (currentTmdbPlaying.server === 'torrent_p2p') {
+                            currentSoberanoSeason = curSeason;
+                            currentSoberanoEpisode = nextEpNum;
+                            showToast(`${offset > 0 ? 'Siguiente' : 'Anterior'}: T${curSeason} • Episodio ${nextEpNum}`);
+                            openSoberanoSwarmModal(cItem, 'tv', curSeason, nextEpNum);
+                        } else if (typeof launchTmdbPlayback === 'function') {
+                            showToast(`${offset > 0 ? 'Siguiente' : 'Anterior'}: T${curSeason} • Episodio ${nextEpNum}`);
+                            launchTmdbPlayback(cItem, 'tv', 'native', curSeason, nextEpNum);
+                        }
+                    } else {
+                        showToast('Ya estás en el primer episodio');
+                    }
+                }
+                return;
+            }
             if (!activeAnime || !activeEpisode) return;
             let currentEpNum = activeEpisode.episode;
             let targetEpNum = currentEpNum + offset;
@@ -14499,12 +14522,13 @@
                 // JAMÁS conmutar al proveedor de películas/series (Cuevana/Framex).
                 // Reintentar el propio flujo HLS del Torrent mientras termina de llenar el primer segmento.
                 if (isSoberanoTorrent) {
+                    const resumePos = startTime || (video && video.currentTime > 5 ? video.currentTime : 0);
                     currentTmdbPlaying.torrentRetries = (currentTmdbPlaying.torrentRetries || 0) + 1;
-                    if (currentTmdbPlaying.torrentRetries <= 4) {
-                        showToast(`⏳ Llenando búfer P2P en RAM (intento ${currentTmdbPlaying.torrentRetries}/4)...`);
+                    if (currentTmdbPlaying.torrentRetries <= 6) {
+                        showToast(`⏳ Recuperando flujo P2P en RAM (intento ${currentTmdbPlaying.torrentRetries}/6)...`);
                         setTimeout(() => {
                             if (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p') {
-                                executeTmdbDirectPlayback(0, startTime);
+                                executeTmdbDirectPlayback(0, resumePos);
                             }
                         }, 2500);
                     } else {
@@ -14650,8 +14674,23 @@
                     });
                     hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                         if (data.fatal) {
+                            const resumePos = (video && video.currentTime > 5) ? video.currentTime : startTime;
+                            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsPlayer && (hlsPlayer._netRetries || 0) < 3) {
+                                hlsPlayer._netRetries = (hlsPlayer._netRetries || 0) + 1;
+                                console.warn(`[TMDB PLAYER] HLS Network Error recuperable (${hlsPlayer._netRetries}/3) en [${cleanName}], reanudando carga...`, data.details);
+                                setTimeout(() => {
+                                    if (hlsPlayer) hlsPlayer.startLoad(resumePos > 0 ? resumePos : -1);
+                                }, 1200);
+                                return;
+                            }
+                            if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsPlayer && !hlsPlayer._mediaRecovered) {
+                                hlsPlayer._mediaRecovered = true;
+                                console.warn(`[TMDB PLAYER] HLS Media Error recuperable en [${cleanName}], ejecutando recoverMediaError()...`, data.details);
+                                hlsPlayer.recoverMediaError();
+                                return;
+                            }
                             console.warn(`[TMDB PLAYER] HLS Fatal en servidor [${cleanName}], pasando al siguiente...`, data);
-                            executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                            executeTmdbDirectPlayback(serverIndex + 1, resumePos || 0);
                         }
                     });
                 } else {

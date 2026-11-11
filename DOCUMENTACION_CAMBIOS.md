@@ -145,7 +145,36 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 6. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 6. Blindaje Contra Cortes a Mitad de Capítulo en Torrents Pesados y Persistencia del Servicio webOS
+
+### 📂 Archivos involucrados
+* [`service/soberano_torrent_daemon.js`](service/soberano_torrent_daemon.js) (`BoundedRamChunkStore`, `ffmpegArgs`, `resetActiveTimer`, `/hls/`)
+* [`service/service.js`](service/service.js) (`--disable-timeouts`, `service.activityManager`)
+* [`app/index.html`](app/index.html) (`Hls.Events.ERROR`, `executeTmdbDirectPlayback`, `playAdjacentEpisode`)
+
+### 🎯 ¿Para qué sirve?
+* Evita que un capítulo o película pesada en Torrent (`> 500 MB` a varios GB) se detenga prematuramente a mitad de reproducción (por ejemplo, en el minuto 27 de un episodio de 52 minutos) engañando al reproductor como si el capítulo hubiera terminado (`#EXT-X-ENDLIST`).
+* Impide que el administrador de servicios de LG webOS (`run-unified-service-server`) apague el servicio local (`9099`) tras 5 segundos sin mensajes por el bus Luna.
+* Permite que al terminar realmente un episodio de una serie en modo Torrent o TMDB, el reproductor avance o abra el selector del siguiente episodio automáticamente.
+
+### ⚙️ ¿Cómo funciona?
+1. **Memoria Circular Inteligente con Spillover Efímero (`BoundedRamChunkStore`):**
+   * WebTorrent descarga piezas fuera de orden a hasta `8 MB/s`. Anteriormente, cuando el almacén en RAM superaba su límite de `320 MB`, una cola FIFO simple borraba piezas antiguas o intermedias que `ffmpeg` aún no había leído, provocando `Chunk not found in RAM window` $\rightarrow$ `[http] Stream ends prematurely` $\rightarrow$ `#EXT-X-ENDLIST` prematuro.
+   * Ahora `BoundedRamChunkStore` (`512 MB` de ventana en RAM) rastrea el cursor real de lectura de FFmpeg (`this.lastReadIndex`):
+     1. Al liberar RAM, desaloja primero las piezas **ya leídas** (`oldIdx < lastReadIndex - 32`).
+     2. Si el enjambre P2P descarga más de `512 MB` por delante de FFmpeg, vuelca temporalmente los chunks futuros no leídos a `/tmp/soberano_chunks/<storeId>/<index>.chunk` y los recupera de forma transparente cuando FFmpeg llega a ese byte, eliminándolos en cuanto se cierra o cambia el torrent (`0 B` de residuo permanente en disco).
+2. **Flags de Reconexión HTTP en FFmpeg y Guardián de Inactividad de 3 Horas:**
+   * Se agregaron `-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5` antes de `-i` en FFmpeg para tolerar micro-pausas del servidor interno de WebTorrent.
+   * El temporizador de limpieza (`resetActiveTimer`) aumentó de 20 a **180 minutos** y verifica si `ffmpegProc.exitCode === null` antes de purgar la sesión.
+3. **Bloqueo Permanente de Actividad en webOS (`service/service.js`):**
+   * En webOS 5.6, `/usr/lib/node_modules/webos-service/lib/activitymanager.js` cierra cualquier servicio tras 5 segundos de inactividad en el bus Luna a menos que reciba `--disable-timeouts` y tenga una actividad registrada.
+   * `service.js` inyecta `--disable-timeouts` en `process.argv` antes de cargar `webos-service`, fija `exitOnTimeout = false` y crea `soberanoPermanentActivity`.
+4. **Auto-Recuperación de `Hls.js` en el Reproductor (`app/index.html`):**
+   * Ante un error de red o de decodificación (`NETWORK_ERROR` / `MEDIA_ERROR`), `Hls.js` ejecuta `hlsPlayer.startLoad(resumePos)` o `hlsPlayer.recoverMediaError()` conservando el segundo exacto (`video.currentTime`) en lugar de reiniciar el capítulo desde `0:00`.
+
+---
+
+## 7. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash
