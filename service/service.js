@@ -16,6 +16,7 @@ const https = require('https');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 // 1. webOS Luna Service Bridge Registration
 let service = null;
@@ -50,21 +51,68 @@ try {
 const PORT = 9099;
 const BIND_HOST = '0.0.0.0';
 
-// Resolution paths for files
+// Resolution paths for files — pick the newest modified file so IPK and hot-patches never serve stale UI
 function findIpadVaultHtml() {
     const candidates = [
+        '/media/developer/temp/ipad_vault.html',
         path.join(__dirname, 'ipad_vault.html'),
         path.join(__dirname, '../com.soberano.appletvhub/ipad_vault.html'),
-        '/media/developer/temp/ipad_vault.html',
         '/media/developer/apps/usr/palm/applications/com.soberano.appletvhub/ipad_vault.html'
     ];
-    for (const p of candidates) {
-        if (fs.existsSync(p)) return p;
+    let bestPath = null;
+    let bestMtime = -1;
+    for (let i = 0; i < candidates.length; i++) {
+        const p = candidates[i];
+        try {
+            if (fs.existsSync(p)) {
+                const st = fs.statSync(p);
+                if (st.mtimeMs > bestMtime) {
+                    bestMtime = st.mtimeMs;
+                    bestPath = p;
+                }
+            }
+        } catch (e) {}
     }
-    return null;
+    return bestPath;
 }
 
-const SUBTITLES_DIR = path.join(__dirname, 'subtitles');
+function resolveWritableSubtitlesDir() {
+    const candidates = [
+        '/media/developer/temp/subtitles',
+        path.join(__dirname, 'subtitles'),
+        '/tmp/soberano_subtitles'
+    ];
+    for (let i = 0; i < candidates.length; i++) {
+        const dir = candidates[i];
+        try {
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+            const probe = path.join(dir, '.write_probe');
+            fs.writeFileSync(probe, 'ok', 'utf8');
+            fs.unlinkSync(probe);
+            return dir;
+        } catch (e) {}
+    }
+    return path.join(__dirname, 'subtitles');
+}
+
+function getLocalLanIp() {
+    try {
+        const ifaces = os.networkInterfaces();
+        const names = Object.keys(ifaces);
+        for (let i = 0; i < names.length; i++) {
+            const list = ifaces[names[i]] || [];
+            for (let j = 0; j < list.length; j++) {
+                const iface = list[j];
+                if (iface && iface.family === 'IPv4' && !iface.internal && iface.address) {
+                    return iface.address;
+                }
+            }
+        }
+    } catch (e) {}
+    return '127.0.0.1';
+}
+
+const SUBTITLES_DIR = resolveWritableSubtitlesDir();
 const BURNED_HASHES = {}; // infoHash -> true si el HLS del torrent lleva subtítulos quemados en el video
 
 const HEADERS = {
@@ -2442,7 +2490,7 @@ const server = http.createServer(async (req, res) => {
                     const hashVttPath = path.join(SUBTITLES_DIR, infoHash + '_es.vtt');
                     if (subRes && subRes.status === 'ok' && fs.existsSync(hashVttPath)) {
                         let tvIp = (req.socket && req.socket.localAddress || '').replace(/^::ffff:/, '');
-                        if (!tvIp || tvIp === '127.0.0.1' || tvIp === '::1') tvIp = '192.168.128.8';
+                        if (!tvIp || tvIp === '127.0.0.1' || tvIp === '::1') tvIp = getLocalLanIp();
                         burnSubUrl = `http://${tvIp}:9099/subtitles/${infoHash}_es.vtt`;
                     }
                 } catch (eBurnSub) {
@@ -2767,6 +2815,9 @@ const server = http.createServer(async (req, res) => {
             const html = fs.readFileSync(filePath);
             res.writeHead(200, {
                 'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-store, no-cache, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
                 'Content-Length': Buffer.byteLength(html)
             });
             return res.end(html);
