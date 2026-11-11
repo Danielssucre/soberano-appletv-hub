@@ -48,17 +48,25 @@ Designed under the **Pure Kernel & $0.00 USD Execution Principle**, the platform
 
 ```
 ├── app/
-│   ├── index.html            # Core tvOS/Apple TV interface (SpatialNav, 10-foot UI)
-│   ├── appinfo.json          # webOS Application manifest
-│   └── assets/               # Apple TV icons, badges, and splash screens
+│   ├── index.html                   # Interfaz tvOS/Apple TV completa (10-foot UI, SpatialNav, P2P RAM Player)
+│   └── appinfo.json                 # Manifiesto de aplicación webOS
+├── assets/
+│   ├── icon.png                     # Ícono estándar de la app webOS
+│   └── largeIcon.png                # Ícono grande de la app webOS
 ├── service/
-│   ├── service.js            # Node.js companion service (RAM cache, HLS proxy)
-│   ├── services.json         # webOS LS2 service registration
-│   └── package.json          # Service dependency definitions
+│   ├── service.js                   # Servicio webOS (Node.js 8.12: RAM cache, HLS proxy, torrent swarm & subs)
+│   ├── services.json                # Registro LS2 del servicio webOS
+│   ├── package.json                 # Metadatos del servicio webOS
+│   ├── soberano_torrent_daemon.js   # Demonio P2P WebTorrent en RAM + VideoToolbox HLS (:9097 en Mac M3)
+│   ├── gen_sub_pngs.py              # Renderizador PNG RGBA para burn-in de subtítulos por AirPlay
+│   ├── run_torrent_daemon.sh        # Lanzador seguro LaunchAgent para macOS
+│   └── aligner.json                 # Configuración de host para alineación y daemon
 ├── aligner/
-│   ├── aligner_core.py       # Whisper MLX audio transcription & piecewise mapper
-│   └── aligner_server.py     # HTTP daemon on Apple Silicon host (:9098)
-└── README.md                 # Technical documentation and operational guide
+│   ├── aligner_core.py              # Transcripción Whisper MLX y alineación por tramos
+│   └── aligner_server.py            # Servidor HTTP en Apple Silicon (:9098)
+├── deploy_to_tv.sh                  # Auto-detección de IP TV + build IPK + ares-install + relanzamiento
+├── DOCUMENTACION_CAMBIOS.md         # Manual detallado punto por punto: qué hace y cómo funciona cada cambio
+└── README.md                        # Documentación general de arquitectura
 ```
 
 ---
@@ -66,20 +74,24 @@ Designed under the **Pure Kernel & $0.00 USD Execution Principle**, the platform
 ## 🛠️ Deployment & Setup
 
 ### Requirements
-- **Target Device:** LG Smart TV running webOS (Developer Mode enabled, CLI tools installed: `ares-package`, `ares-install`, `ares-launch`).
-- **Controller Host (Optional for Whisper sync):** macOS on Apple Silicon (M-Series) with Python 3.10+ and `mlx-whisper`.
+- **Target Device:** LG Smart TV running webOS (Developer Mode enabled, CLI tools installed: `ares-package`, `ares-install`, `ares-launch`, `ares-setup-device`).
+- **Controller Host (Mac Apple Silicon M-Series):** Node.js 18+, `ffmpeg` (con `h264_videotoolbox`), Python 3.10+ (`Pillow` para burn-in AirPlay; opcional `mlx-whisper` para alineación ASR).
 
-### 1. Build and Install on LG Smart TV
+### 1. Build, Package and Install Permanently on LG Smart TV
 ```bash
-# Package webOS application and background companion service
-ares-package app/ service/ -o build/
-
-# Install the generated IPK on your target TV
-ares-install -d tv build/com.soberano.appletvhub_1.0.0_all.ipk
-
-# Launch the app
-ares-launch -d tv com.soberano.appletvhub
+# Auto-detecta la IP de tu LG TV por ARP, empaqueta el IPK completo con PalmServiceBridge,
+# lo instala en webOS y sincroniza /media/developer/temp/
+./deploy_to_tv.sh
 ```
+
+### 2. Run the Mac M3 P2P Torrent + HLS Hardware Daemon
+```bash
+cd service/
+./run_torrent_daemon.sh
+```
+
+### 3. Detailed Changelog & Architecture Guide
+Consulta [`DOCUMENTACION_CAMBIOS.md`](DOCUMENTACION_CAMBIOS.md) para ver el detalle técnico completo de cada corrección (para qué sirve y cómo funciona internamente).
 
 ### 2. Run the Host Subtitle Aligner (Optional)
 ```bash

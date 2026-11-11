@@ -1,0 +1,161 @@
+#📘 Documentación Técnica Detallada de Cambios — Soberano Apple TV Hub
+
+Este documento explica **punto por punto** cada cambio, corrección y subsistema agregado recientemente al repositorio, incluyendo **para qué sirve**, **cómo funciona internamente** y **dónde vive cada archivo/función** para futuras referencias o restauraciones.
+
+---
+
+## 🗺️ Índice Rápido de Arquitectura
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│  LG Smart TV (webOS 5.6 - ARMv7 Realtek)                                │
+│                                                                         │
+│  1. App instalada: com.soberano.appletvhub                              │
+│     └─ index.html (Bootstrapper nativo con PalmServiceBridge)           │
+│        └─ Despierta com.soberano.appletvhub.service y abre :9099/ipad   │
+│                                                                         │
+│  2. Servicio webOS: com.soberano.appletvhub.service (Puerto 9099)       │
+│     └─ service/service.js (Node.js 8.12)                                │
+│        ├─ Sirve app/index.html (como ipad_vault.html sin caché)         │
+│        ├─ Federación Torrents (Torrentio + trackers españoles)          │
+│        ├─ Motor de Subtítulos (/api/subtitles/auto + OpenSubtitles)     │
+│        └─ Proxy HLS + Caché RAM (45 MB) para Anime / Series / Películas │
+└─────────────────────────────────▲───────────────────────────────────────┘
+                                  │ Red LAN (HTTP + Descubrimiento ARP)
+┌─────────────────────────────────▼───────────────────────────────────────┐
+│  Mac Apple Silicon M3 (Motor P2P y Transcodificación Hardware)          │
+│                                                                         │
+│  3. Demonio Torrents: service/soberano_torrent_daemon.js (Puerto 9097)  │
+│     ├─ WebTorrent en memoria RAM pura (BoundedRamChunkStore)            │
+│     ├─ Transmuxing JIT a HLS con VideoToolbox (h264_videotoolbox + AAC) │
+│     ├─ Burn-in opcional para AirPlay (service/gen_sub_pngs.py + FFmpeg) │
+│     └─ Auto-anuncio a la TV vía ARP (MAC 58:fd:b1) cada 30 s            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. Despliegue Permanente en TV (IPK webOS + Auto-Arranque sin Surge.sh)
+
+### 📂 Archivos involucrados
+* [`deploy_to_tv.sh`](deploy_to_tv.sh)
+* [`service/service.js`](service/service.js) (`findIpadVaultHtml`, `resolveWritableSubtitlesDir`)
+* [`assets/icon.png`](assets/icon.png) y [`assets/largeIcon.png`](assets/largeIcon.png)
+
+### 🎯 ¿Para qué sirve?
+Evita que la TV vuelva a una interfaz vieja (`surge.sh`) cuando se apaga, se reinicia o cambia de IP por DHCP. Antes, las actualizaciones solo se copiaban a `/media/developer/temp/`, que es volátil al reiniciar la TV; el paquete IPK instalado seguía siendo del 1 de noviembre y carecía de `webOSTV.js`, por lo que al fallar el arranque redirigía a `https://soberano-apple.surge.sh/`.
+
+### ⚙️ ¿Cómo funciona?
+1. **Bootstrapper nativo con `PalmServiceBridge` (`deploy_to_tv.sh`):**
+   * Al ejecutar `./deploy_to_tv.sh`, el script detecta automáticamente la IP actual de la TV buscando la MAC `58:fd:b1` (LG Electronics) en `arp -a` (o en `ares-setup-device`).
+   * Empaqueta un IPK completo con `ares-package` que incluye la UI más reciente (`app/index.html` copiado como `ipad_vault.html`), el servicio (`service/service.js`), los íconos (`assets/*.png`) y un cargador ligero `index.html`.
+   * Cuando abres la app en la TV, ese cargador usa la API nativa **`window.PalmServiceBridge`** (integrada en `WebAppMgr` de webOS, sin librerías externas) para invocar `luna://com.soberano.appletvhub.service/heartbeat` con `{ subscribe: true }`.
+   * Sondea `http://127.0.0.1:9099/status` cada `250 ms` (hasta 24 intentos / 6 s) y apenas responde `200 OK` navega a `http://127.0.0.1:9099/ipad?v=<timestamp>`. Ya no cae en `surge.sh`.
+2. **Selección de la UI más reciente y sin caché (`service/service.js`):**
+   * [`findIpadVaultHtml()`](service/service.js) inspecciona todas las rutas posibles (`/media/developer/temp/ipad_vault.html`, carpeta del servicio y carpeta de la app), compara su fecha de modificación (`statSync(p).mtimeMs`) y sirve **siempre el archivo más reciente**.
+   * La ruta HTTP `/`, `/ipad`, `/tablet` responde con encabezados `Cache-Control: no-store, no-cache, must-revalidate`, `Pragma: no-cache` y `Expires: 0` para impedir que el navegador de webOS muestre código viejo en caché.
+3. **Directorio de subtítulos con respaldo de escritura (`resolveWritableSubtitlesDir()`):**
+   * Verifica en arranque cuál carpeta permite escritura (`/media/developer/temp/subtitles`, `__dirname/subtitles`, o `/tmp/soberano_subtitles`) realizando un `.write_probe` real, garantizando que guardar archivos `.vtt` nunca falle por permisos de sistema en webOS.
+
+---
+
+## 2. Descubrimiento Dinámico de IPs en Red Local (Sin IPs Hardcodeadas)
+
+### 📂 Archivos involucrados
+* [`service/service.js`](service/service.js) (`getLocalLanIp`)
+* [`service/soberano_torrent_daemon.js`](service/soberano_torrent_daemon.js) (`announceToTv`)
+* [`deploy_to_tv.sh`](deploy_to_tv.sh)
+
+### 🎯 ¿Para qué sirve?
+El router asigna IPs dinámicas por DHCP (por ejemplo, la TV pasó de `192.168.128.8` a `192.168.128.11`). Si una IP queda escrita de forma fija en el código, la TV y la Mac dejan de encontrarse al pedir subtítulos o streams P2P.
+
+### ⚙️ ¿Cómo funciona?
+* **En la TV ([`getLocalLanIp()`](service/service.js)):** Lee `os.networkInterfaces()` de Node.js para devolver dinámicamente la IPv4 real de la interfaz activa de la TV (`eth0` / Wi-Fi) cuando construye URLs internas como `burnSubUrl`.
+* **En la Mac ([`announceToTv()`](service/soberano_torrent_daemon.js)):** Cada 30 segundos ejecuta `arp -a`, filtra la MAC de LG (`58:fd:b1`) y registra la IP actual de la Mac en `/api/daemon/register?host=<lanIp>&port=9097` contra la TV descubierta.
+
+---
+
+## 3. Subtítulos Inteligentes, Anti-Duplicidad y Detección Real de Idioma
+
+### 📂 Archivos involucrados
+* [`service/service.js`](service/service.js) (`parseTorrentioStream`, `/api/soberano/play`, `/api/soberano/play_stream`)
+* [`app/index.html`](app/index.html) (`enforceSpanishTracks`, `isBurnedTorrent`, `isLocalDomSubModeForTorrent`, `launchSoberanoTorrentPlayback`, `playSoberanoTorrent`, `toggleSubtitles`, `onAutoSubPillClick`, `reloadSoberanoVariant`, listener `timeupdate`)
+
+### 🎯 ¿Para qué sirve?
+Resuelve dos fallos opuestos que ocurrían en la TV:
+1. **Subtítulos duplicados:** Cuando el navegador webOS pintaba la pista WebVTT nativa (`mode = 'showing'`) al mismo tiempo que el reproductor pintaba la pastilla visual `#soberanoSubOverlay` (o cuando un video con subtítulos ya quemados en los píxeles recibía un overlay encima).
+2. **Subtítulos ausentes en series/películas en inglés:** Torrentio agrega al final de los releases una fila con +20 banderas de subtítulos embebidos (ej. `🇬🇧 / 🇯🇵 / ... / 🇪🇸 / ...`). Antes, esa bandera `🇪🇸` hacía que el sistema creyera que el **audio** era español (`is_es = true`) y omitiera por completo buscar subtítulos.
+
+### ⚙️ ¿Cómo funciona?
+1. **Separación estricta entre Audio Español y Subtítulos Embebidos (`parseTorrentioStream`):**
+   * Filtra y excluye de la detección de audio cualquier línea que contenga `3` o más emojis de banderas regionales (`[\uD83C][\uDDE6-\uDDFF]...`) y limpia palabras como `subtitulado`, `multisub`, `esub`.
+   * Solo marca `is_es: true` cuando el título del release o el tracker (`Cinecalidad`, `MejorTorrent`, `Wolfmax4k`, `BestTorrents`, `Latino`, `Castellano`, `SPA`, `ESP`) confirma **audio en español**.
+2. **Modo Nativo TV (`#soberanoSubOverlay`) vs Modo AirPlay (`burn=1`):**
+   * En **LG TV local** ([`isLocalDomSubModeForTorrent()`](app/index.html)):
+     * `playSoberanoTorrent` solicita `burn=0` para arrancar el video de inmediato sin esperar renderizado de subtítulos en FFmpeg.
+     * Si el audio no es exclusivamente español (`!stream.is_es || stream.is_dual`), `launchSoberanoTorrentPlayback` dispara automáticamente `autoSearchAndAnchorSpanishSub(0)`, descargando pistas de OpenSubtitles/Framex y activando el overlay `#soberanoSubOverlay`.
+     * Ventajas en TV: cambio instantáneo entre pistas (`Pista 1..9`), encendido/apagado (`OFF` ↔ `ES`) sin reiniciar el video y calibración de sincronización en `0 ms` (`-1s`, `-0.5s`, `+0.5s`, `+1s` o botones rojo/verde/azul del control remoto).
+   * En **iPhone/iPad hacia AirPlay**:
+     * Solicita `burn=1` para que la Mac M3 incruste los subtítulos directamente en los píxeles del video (porque Apple/LG AirPlay 2 descarta pistas `<track>` externas). Si no hubiera quemado disponible, cae automáticamente al overlay DOM.
+3. **Regla Anti-Duplicidad (`enforceSpanishTracks` + `timeupdate`):**
+   * Si `isBurnedTorrent()` es `true`: silencia TODAS las pistas `<track>` (`mode = 'disabled'`), limpia y oculta `#soberanoSubOverlay` y marca `BURNED_HASHES[hash] = true` en `service.js` para no inyectar `#EXT-X-MEDIA:TYPE=SUBTITLES` en `index.m3u8`.
+   * Si NO es `burned` y se reproduce localmente en TV (`!videoEl.webkitCurrentPlaybackTargetIsWireless`): todas las pistas españolas se mantienen en **`mode = 'hidden'`** (y cualquier pista en otro idioma en `'disabled'`) para que webOS jamás dibuje texto nativo sobre `#soberanoSubOverlay`.
+   * Solo cuando `webkitCurrentPlaybackTargetIsWireless === true` (AirPlay inalámbrico activo), pasa la pista a `'showing'` y oculta el overlay DOM local.
+4. **Botón de Subtítulos robusto (`toggleSubtitles`, `reloadSoberanoVariant`):**
+   * Si se solicita activación forzada en un torrent (`burn=1`), envía `&force_sub=1` y limpia `&is_es=1` para que `service.js` no bloquee la búsqueda.
+   * Al recargar variantes en webOS, llama a `executeTmdbDirectPlayback(0, keepT)` en vez de reasignar `video.src` directamente, manteniendo `Hls.js` intacto en la posición exacta (`keepT`).
+
+---
+
+## 4. Transcodificación RAM-HLS y Burn-In Hardware en Mac M3
+
+### 📂 Archivos involucrados
+* [`service/soberano_torrent_daemon.js`](service/soberano_torrent_daemon.js)
+* [`service/gen_sub_pngs.py`](service/gen_sub_pngs.py)
+* [`service/run_torrent_daemon.sh`](service/run_torrent_daemon.sh)
+
+### 🎯 ¿Para qué sirve?
+Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC o audio EAC3/AC3/DTS incompatibles con navegadores) directamente desde la memoria RAM sin llenar el disco duro ni dejar residuos, a `0 $` de costo.
+
+### ⚙️ ¿Cómo funciona?
+1. **`BoundedRamChunkStore`:** Almacena las piezas descargadas por `WebTorrent` en un búfer circular en RAM (máximo `280` piezas / ~280 MB), descartando automáticamente las piezas ya reproducidas y priorizando los primeros `8 MB` del archivo de video como críticos.
+2. **Transmuxing JIT (`h264_videotoolbox`):** FFmpeg lee el flujo HTTP interno (`/webtorrent/...`) y codifica por aceleración hardware de Apple Silicon M3 a `H.264 8-bit yuv420p` (`5.5 Mbps`) + `AAC Stereo 192k` en segmentos HLS de `3 s` (`/tmp/soberano_hls/<hash>/seg_XXXX.ts`).
+3. **Pipeline de Burn-in (`gen_sub_pngs.py`):** Cuando `burn=1` incluye `?sub=<url_vtt>`, descarga el `.vtt`, genera una franja RGBA transparente de `1920x240` por cada diálogo con Pillow y un archivo `concat.txt`, y FFmpeg lo compone en un solo paso sobre el video usando el filtro `overlay=0:H-h`.
+4. **Supervisor seguro (`run_torrent_daemon.sh`):** Copia `soberano_torrent_daemon.js` y `gen_sub_pngs.py` a `~/.soberano-daemon/` (fuera de iCloud Drive para evitar desalojos de archivos en la nube) y reinicia el agente `launchd` `com.soberano.torrentdaemon`.
+
+---
+
+## 5. Selector HIG de Temporadas/Episodios y Tarjetas de Enjambre P2P
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`openSoberanoSwarmModal`, `initSoberanoSeasonEpisodeSelectors`, `selectSoberanoSeason`, `renderSoberanoEpisodeTabs`, `selectSoberanoEpisode`, `renderSoberanoTorrentListFromCache`)
+
+### 🎯 ¿Para qué sirve?
+* Los `<select>` nativos de HTML fallan o pierden el foco con el Magic Remote y D-Pad en webOS.
+* Las tarjetas de torrents mostraban insignias de seeds/resolución montadas encima del nombre del archivo.
+
+### ⚙️ ¿Cómo funciona?
+1. **Carruseles de pastillas táctiles (Apple TV HIG):**
+   * `#soberanoSeasonTabs` y `#soberanoEpisodeTabs` reemplazan los `<select>` con botones `.season-tab` navegables por control remoto (`SpatialNav`).
+   * Si el ID recibido es numérico (TMDB), consulta `/api/tmdb/tv/:id/external_ids` para obtener el `imdb_id` (`tt...`), consulta Cinemeta (`v3-cinemeta.strem.io`) para obtener las temporadas y episodios reales con sus títulos, y recarga los torrents automáticamente al cambiar de temporada o capítulo.
+2. **Tarjetas `.soberano-torrent-item` en 3 filas limpias:**
+   * **Fila 1:** Badges de calidad (`4K`/`1080p`), rango dinámico (`HDR`/`SDR`), idioma (`Español`/`Multi`), seeds (`👤`), tamaño (`💾`) y velocidad estimada.
+   * **Fila 2:** Nombre completo del release con `word-break: break-word` y `line-height: 1.4` sin colisiones ni recortes bruscos.
+   * **Fila 3:** Tracker y origen (`1337x • Torrentio`) junto al botón de acción **RAM Play**.
+
+---
+
+## 6. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+
+1. **En la Mac (Demonio P2P puerto `9097`):**
+   ```bash
+   cd service
+   ./run_torrent_daemon.sh
+   ```
+   *(Asegúrate de tener instalados `node`, `ffmpeg`, `python3` con `Pillow`, y `npm install` dentro de `~/.soberano-daemon`)*
+
+2. **En la LG Smart TV (App + Servicio puerto `9099`):**
+   ```bash
+   ./deploy_to_tv.sh
+   ```
+   *(Requiere Developer Mode encendido en la TV, llave SSH `~/.ssh/tv_webos` y CLI `ares-*` en macOS. El script detecta la IP nueva automáticamente, genera el IPK, lo instala y abre la app).*

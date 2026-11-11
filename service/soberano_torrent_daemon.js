@@ -8,10 +8,14 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { spawn, execFile } from 'child_process';
+import crypto from 'crypto';
+import os from 'os';
 
 const PORT = parseInt(process.env.SOBERANO_TORRENT_PORT || 9097, 10);
 const HOST = '0.0.0.0';
 const HLS_BASE_DIR = '/tmp/soberano_hls';
+const SUBS_BASE_DIR = '/tmp/soberano_subs';
+const GEN_SUB_PY = path.join(path.dirname(new URL(import.meta.url).pathname), 'gen_sub_pngs.py');
 const FFMPEG_BIN = fs.existsSync('/opt/homebrew/bin/ffmpeg') ? '/opt/homebrew/bin/ffmpeg' : 'ffmpeg';
 const FFPROBE_BIN = fs.existsSync('/opt/homebrew/bin/ffprobe') ? '/opt/homebrew/bin/ffprobe' : 'ffprobe';
 
@@ -153,6 +157,7 @@ function cleanupHlsSession(hashToClean = null) {
         if (activeHlsSession.hlsDir) {
             try { fs.rmSync(activeHlsSession.hlsDir, { recursive: true, force: true }); } catch (e) {}
         }
+        try { fs.rmSync(path.join(SUBS_BASE_DIR, activeHlsSession.infoHash), { recursive: true, force: true }); } catch (e) {}
         activeHlsSession = null;
     }
 }
@@ -194,7 +199,46 @@ function probeStreamStreams(rawStreamUrl) {
     });
 }
 
-async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = false) {
+function fetchToFile(urlStr, dest, timeoutMs = 7000) {
+    return new Promise((resolve, reject) => {
+        const req = http.get(urlStr, { timeout: timeoutMs }, (r) => {
+            if (r.statusCode !== 200) { r.resume(); return reject(new Error('HTTP ' + r.statusCode)); }
+            const ws = fs.createWriteStream(dest);
+            r.pipe(ws);
+            ws.on('finish', () => resolve(dest));
+            ws.on('error', reject);
+        });
+        req.on('timeout', () => { req.destroy(new Error('timeout')); });
+        req.on('error', reject);
+    });
+}
+
+// Prepara PNGs de subtítulos + lista concat para quemarlos en el video (burn-in) con filtro overlay.
+// Necesario porque AirPlay hacia TVs LG (webOS) descarta las pistas de subtítulos y solo reproduce el video.
+async function prepareBurnInSubs(infoHash, subUrl, subOff) {
+    const dir = path.join(SUBS_BASE_DIR, infoHash);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+    fs.mkdirSync(dir, { recursive: true });
+    const vttPath = path.join(dir, 'src.vtt');
+    await fetchToFile(subUrl, vttPath);
+    const pngDir = path.join(dir, 'png');
+    const t0 = Date.now();
+    await new Promise((resolve, reject) => {
+        execFile('/usr/bin/python3', [GEN_SUB_PY, vttPath, pngDir, String(subOff || 0)], { timeout: 60000 }, (err, stdout, stderr) => {
+            if (err) return reject(new Error((stderr || err.message).slice(0, 200)));
+            resolve(stdout.trim());
+        });
+    });
+    const concatPath = path.join(pngDir, 'concat.txt');
+    if (!fs.existsSync(concatPath)) throw new Error('concat.txt no generado');
+    console.log(`[SOBERANO_DAEMON] Burn-in listo: PNGs de subtítulos en ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    return concatPath;
+}
+
+async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = false, opts = {}) {
+    const burnSubUrl = (opts && opts.subUrl) || '';
+    const burnOff = (opts && opts.subOff) || 0;
+    const sessionKey = burnSubUrl ? `${burnSubUrl}|${burnOff}` : '';
     const infoHash = torrent.infoHash.toLowerCase();
     const hlsDir = path.join(HLS_BASE_DIR, infoHash);
     const m3u8Path = path.join(hlsDir, 'index.m3u8');
@@ -205,6 +249,7 @@ async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = fal
         activeHlsSession &&
         activeHlsSession.infoHash === infoHash &&
         activeHlsSession.fileIndex === fileIndex &&
+        (activeHlsSession.subKey || '') === sessionKey &&
         ((fs.existsSync(m3u8Path) && fs.existsSync(firstSegPath)) ||
          (activeHlsSession.ffmpegProc && activeHlsSession.ffmpegProc.exitCode === null))
     ) {
@@ -251,7 +296,43 @@ async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = fal
     const selectedAudioMap = '0:a:0?';
     const selectedAudioLang = preferEs ? 'es/orig' : 'orig';
 
-    const ffmpegArgs = [
+    let concatPath = null;
+    if (burnSubUrl) {
+        try {
+            concatPath = await prepareBurnInSubs(infoHash, burnSubUrl, burnOff);
+        } catch (eBurn) {
+            console.warn('[SOBERANO_DAEMON] Burn-in no disponible, se usa video sin subtítulos quemados:', eBurn.message);
+            concatPath = null;
+        }
+    }
+
+    const ffmpegArgs = concatPath ? [
+        '-loglevel', 'error',
+        '-seekable', '0',
+        '-analyzeduration', '1000000',
+        '-probesize', '1000000',
+        '-i', rawStreamUrl,
+        '-f', 'concat', '-safe', '0', '-i', concatPath,
+        '-filter_complex', '[0:v:0]scale=1920:-2,format=yuv420p[v0];[1:v]format=rgba[s];[v0][s]overlay=0:H-h:eof_action=pass:format=auto,format=yuv420p[v]',
+        '-map', '[v]',
+        '-map', selectedAudioMap,
+        '-c:v', 'h264_videotoolbox',
+        '-b:v', '5500k',
+        '-maxrate', '7800k',
+        '-bufsize', '12000k',
+        '-pix_fmt', 'yuv420p',
+        '-g', '48',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '192k',
+        '-f', 'hls',
+        '-hls_time', '3',
+        '-hls_list_size', '0',
+        '-hls_playlist_type', 'event',
+        '-hls_flags', 'independent_segments+append_list+temp_file',
+        '-hls_segment_filename', path.join(hlsDir, 'seg_%04d.ts'),
+        m3u8Path
+    ] : [
         '-loglevel', 'error',
         '-seekable', '0',
         '-analyzeduration', '1000000',
@@ -301,6 +382,8 @@ async function ensureHlsTransmuxSession(torrent, file, fileIndex, preferEs = fal
         videoCodec: 'h264_videotoolbox',
         audioLang: selectedAudioLang,
         filename: file.name,
+        subKey: concatPath ? sessionKey : '',
+        burned: !!concatPath,
         ready: false
     };
 
@@ -401,6 +484,7 @@ const myServer = http.createServer(async (req, res) => {
         const fileIdx = parseInt(reqUrl.searchParams.get('fileIdx') || reqUrl.searchParams.get('idx') || -1, 10);
         const dn = reqUrl.searchParams.get('name') || reqUrl.searchParams.get('title') || 'video';
         const isEs = reqUrl.searchParams.get('is_es') === '1' || reqUrl.searchParams.get('is_es') === 'true';
+        const burnOpts = { subUrl: reqUrl.searchParams.get('sub') || '', subOff: parseFloat(reqUrl.searchParams.get('off') || '0') || 0 };
 
         if (!infoHash) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -422,7 +506,7 @@ const myServer = http.createServer(async (req, res) => {
         try {
             let existing = await client.get(infoHash);
             if (existing && existing.ready && Array.isArray(existing.files) && existing.files.length > 0) {
-                return await sendTorrentReadyResponse(existing, fileIdx, isEs, req, res);
+                return await sendTorrentReadyResponse(existing, fileIdx, isEs, req, res, burnOpts);
             }
 
             if (existing) {
@@ -430,7 +514,7 @@ const myServer = http.createServer(async (req, res) => {
                 const onReady = async () => {
                     if (responded) return;
                     responded = true;
-                    await sendTorrentReadyResponse(existing, fileIdx, isEs, req, res);
+                    await sendTorrentReadyResponse(existing, fileIdx, isEs, req, res, burnOpts);
                 };
                 existing.once('ready', onReady);
                 setTimeout(() => {
@@ -463,7 +547,7 @@ const myServer = http.createServer(async (req, res) => {
                 clearTimeout(metaTimeout);
                 if (timeoutTriggered || res.headersSent) return;
                 console.log(`[SOBERANO_DAEMON] Metadatos listos para ${torrent.name}! Archivos: ${torrent.files.length}`);
-                await sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res);
+                await sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res, burnOpts);
             });
         } catch (eAdd) {
             clearTimeout(metaTimeout);
@@ -479,7 +563,7 @@ const myServer = http.createServer(async (req, res) => {
     res.end('Not Found');
 });
 
-async function sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res) {
+async function sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res, opts = {}) {
     if (!torrent || !Array.isArray(torrent.files) || torrent.files.length === 0) {
         if (!res.headersSent) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -511,7 +595,7 @@ async function sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res) {
     const encodedFilePath = file.path.split(/[/\\]/).map(encodeURIComponent).join('/');
     const rawStreamPath = `/webtorrent/${torrent.infoHash}/${encodedFilePath}`;
 
-    const hlsSession = await ensureHlsTransmuxSession(torrent, file, actualIdx, isEs);
+    const hlsSession = await ensureHlsTransmuxSession(torrent, file, actualIdx, isEs, opts);
     const hlsPath = `/hls/${torrent.infoHash.toLowerCase()}/index.m3u8`;
 
     if (res.headersSent) return;
@@ -527,6 +611,7 @@ async function sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res) {
         videoCodec: hlsSession ? hlsSession.videoCodec : 'unknown',
         audioLang: hlsSession ? hlsSession.audioLang : 'orig',
         hls_ready: hlsSession ? hlsSession.ready : false,
+        burned: hlsSession ? !!hlsSession.burned : false,
         hls_path: hlsPath,
         hls_url: `http://${hostHeader}${hlsPath}`,
         stream_path: rawStreamPath,
@@ -537,4 +622,43 @@ async function sendTorrentReadyResponse(torrent, fileIdx, isEs, req, res) {
 
 myServer.listen(PORT, HOST, () => {
     console.log(`[SOBERANO_DAEMON] SOBERANO Torrent RAM-HLS Daemon escuchando en http://${HOST}:${PORT}`);
+    
+    // Auto-registro periódico de IP en el companion server de LG TV (puerto 9099) con descubrimiento ARP
+    function announceToTv() {
+        try {
+            const ifaces = os.networkInterfaces();
+            let lanIp = '192.168.128.4';
+            for (const name of Object.keys(ifaces)) {
+                for (const iface of ifaces[name]) {
+                    if (iface.family === 'IPv4' && !iface.internal && iface.address.startsWith('192.168.')) {
+                        lanIp = iface.address;
+                        break;
+                    }
+                }
+            }
+            const sendReg = (tvHost) => {
+                const req = http.get(`http://${tvHost}:9099/api/daemon/register?host=${lanIp}&port=${PORT}`, (res) => {
+                    if (res.statusCode === 200) {
+                        console.log(`[SOBERANO_DAEMON] Registrado en TV (${tvHost}) con IP: ${lanIp}`);
+                    }
+                });
+                req.on('error', () => {});
+                req.setTimeout(2500, () => req.abort());
+            };
+            execFile('arp', ['-a'], (err, stdout) => {
+                const targets = new Set(['192.168.128.11', '192.168.128.8']);
+                if (!err && stdout) {
+                    for (const line of stdout.split('\n')) {
+                        if (line.toLowerCase().includes('58:fd:b1')) {
+                            const m = line.match(/\((\d+\.\d+\.\d+\.\d+)\)/);
+                            if (m) targets.add(m[1]);
+                        }
+                    }
+                }
+                for (const tvHost of targets) sendReg(tvHost);
+            });
+        } catch(e) {}
+    }
+    announceToTv();
+    setInterval(announceToTv, 30000);
 });
