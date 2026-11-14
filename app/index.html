@@ -4149,7 +4149,7 @@
                     <button class="btn-next-now btn-ctrl" id="btnNextNow" onclick="triggerNextEpisodeNow()">
                         <i class="fa fa-play"></i> Reproducir ya (<span id="nextEpSecDisplay">5</span>s)
                     </button>
-                    <button class="btn-next-cancel btn-ctrl" id="btnNextCancel" onclick="cancelNextEpisodeCountdown()">
+                    <button class="btn-next-cancel btn-ctrl" id="btnNextCancel" onclick="cancelNextEpisodeCountdown(true)">
                         <i class="fa fa-times"></i> Cancelar
                     </button>
                 </div>
@@ -10749,8 +10749,9 @@
             // Auto-play siguiente episodio al terminar video (estilo Apple TV / Netflix con cuenta regresiva interactiva)
             if (video) {
                 video.addEventListener('ended', () => {
+                    console.log('[AUTOPLAY] Evento video "ended" nativo recibido');
                     if (autoPlayNextEnabled && isCurrentPlaybackSeries()) {
-                        startNextEpisodeCountdown();
+                        triggerNextEpisodeNow();
                     } else if (isCurrentPlaybackSeries()) {
                         showToast('Episodio completado. Usa Sig para avanzar.');
                     }
@@ -12227,6 +12228,9 @@
         }
 
         async function launchEpisodePlayback(anime, episode, resumeTime = 0) {
+            nextEpAutoTriggered = false;
+            nextEpCancelledForThisEpisode = false;
+            cancelNextEpisodeCountdown();
             currentTmdbPlaying = null;
             activeAnime = anime;
             activeEpisode = episode;
@@ -12494,6 +12498,18 @@
                     if (startTime > 0) video.currentTime = startTime;
                     video.play().catch(e => console.log('HLS play waiting for interaction:', e));
                 });
+                hlsPlayer.on(Hls.Events.BUFFER_EOS, () => {
+                    console.log('[AUTOPLAY] Anime HLS BUFFER_EOS alcanzado');
+                    if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
+                        const cur = video ? (video.currentTime || 0) : 0;
+                        const dur = getEffectiveVideoDuration();
+                        if (!dur || dur - cur <= 15.0) {
+                            if (!nextEpCountdownTimer) {
+                                startNextEpisodeCountdown(3);
+                            }
+                        }
+                    }
+                });
                 hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
                         console.warn(`HLS Fatal en servidor [${cleanName}], pasando al siguiente...`, data);
@@ -12583,6 +12599,16 @@
             document.getElementById('playIcon').className = 'fa fa-play';
             document.getElementById('playBtnText').textContent = 'Reproducir';
             handlePlayerUserActivity();
+
+            // SOBERANO EOF GUARD: Si el stream termina y el reproductor webOS se pausa al final sin disparar 'ended'
+            if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
+                const cur = video ? (video.currentTime || 0) : 0;
+                const dur = getEffectiveVideoDuration();
+                if (dur > 45 && cur > 30 && (dur - cur <= 4.0 || cur >= dur - 1.0)) {
+                    console.log(`[AUTOPLAY] Stream pausado al final (EOF sin ended: cur=${cur.toFixed(1)}, dur=${dur.toFixed(1)}). Avanzando automáticamente...`);
+                    triggerNextEpisodeNow();
+                }
+            }
         });
 
         function updateScrubberUi(cur, dur) {
@@ -12597,14 +12623,33 @@
         }
 
         video.addEventListener('timeupdate', () => {
-            if (!video.duration || !isFinite(video.duration)) return;
-            const cur = video.currentTime;
-            const dur = video.duration;
-            updateScrubberUi(cur, dur);
+            const cur = video ? (video.currentTime || 0) : 0;
+            const dur = getEffectiveVideoDuration();
+            if (dur > 0) {
+                updateScrubberUi(cur, dur);
+            }
 
             // Guardar progreso cada 5 segundos
-            if (Math.floor(cur) % 5 === 0 && activeAnime && activeEpisode) {
+            if (Math.floor(cur) % 5 === 0 && activeAnime && activeEpisode && dur > 0) {
                 recordEpisodeHistory(activeAnime, activeEpisode, cur, dur);
+            }
+
+            // SOBERANO AUTOPLAY INTELIGENTE (Apple TV / Netflix): Detección proactiva de créditos y avance continuo
+            if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
+                if (dur > 60 && cur > 30) {
+                    const remaining = dur - cur;
+                    // Créditos finales: si faltan 15 segundos o menos para el final, mostrar la cuenta regresiva Apple TV
+                    if (remaining <= 15.0 && remaining > 1.5) {
+                        if (!nextEpCountdownTimer) {
+                            console.log(`[AUTOPLAY] Créditos finales detectados (restan ${remaining.toFixed(1)}s). Iniciando tarjeta Apple TV...`);
+                            startNextEpisodeCountdown(Math.min(5, Math.max(2, Math.floor(remaining))));
+                        }
+                    } else if (remaining <= 1.5 && remaining >= 0) {
+                        // Fin absoluto alcanzado: avanzar de inmediato
+                        console.log(`[AUTOPLAY] Fin del episodio alcanzado (restan ${remaining.toFixed(1)}s). Avanzando ya...`);
+                        triggerNextEpisodeNow();
+                    }
+                }
             }
 
             // SOBERANO SUBTITLES ENGINE: Renderizado DOM prioritario en pantalla de TV
@@ -12637,22 +12682,30 @@
 
         function seekScrubber(e) {
             if (serverMode === 'iframe' || !video) return;
-            const dur = video.duration && isFinite(video.duration) ? video.duration : (video.seekable && video.seekable.length > 0 ? video.seekable.end(video.seekable.length - 1) : 0);
+            const dur = getEffectiveVideoDuration();
             if (!dur || dur <= 0) return;
             const rect = document.getElementById('scrubberContainer').getBoundingClientRect();
             const clickPos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
             const target = clickPos * dur;
             video.currentTime = target;
             updateScrubberUi(target, dur);
+            if (nextEpCountdownTimer && dur > 0 && (dur - target > 20)) {
+                cancelNextEpisodeCountdown();
+                nextEpAutoTriggered = false;
+            }
         }
 
         function seekRelative(seconds) {
             if (serverMode === 'iframe' || !video) return;
-            const dur = video.duration && isFinite(video.duration) ? video.duration : (video.seekable && video.seekable.length > 0 ? video.seekable.end(video.seekable.length - 1) : 0);
+            const dur = getEffectiveVideoDuration();
             const cur = video.currentTime || 0;
             const target = dur > 0 ? Math.max(0, Math.min(dur, cur + seconds)) : Math.max(0, cur + seconds);
             video.currentTime = target;
             if (dur > 0) updateScrubberUi(target, dur);
+            if (nextEpCountdownTimer && dur > 0 && (dur - target > 20)) {
+                cancelNextEpisodeCountdown();
+                nextEpAutoTriggered = false;
+            }
         }
 
         function formatTime(sec) {
@@ -12701,6 +12754,25 @@
         let autoPlayNextEnabled = localStorage.getItem('soberano_autoplay_next') !== 'false';
         let nextEpCountdownTimer = null;
         let nextEpCountdownSeconds = 5;
+        let nextEpAutoTriggered = false;
+        let nextEpCancelledForThisEpisode = false;
+
+        function getEffectiveVideoDuration() {
+            if (video) {
+                if (video.duration && isFinite(video.duration) && video.duration > 0) {
+                    return video.duration;
+                }
+                if (video.seekable && video.seekable.length > 0) {
+                    const end = video.seekable.end(video.seekable.length - 1);
+                    if (isFinite(end) && end > 0) return end;
+                }
+            }
+            if (hlsPlayer && hlsPlayer.levels && hlsPlayer.currentLevel >= 0 && hlsPlayer.levels[hlsPlayer.currentLevel] && hlsPlayer.levels[hlsPlayer.currentLevel].details) {
+                const hlsDur = hlsPlayer.levels[hlsPlayer.currentLevel].details.totalduration;
+                if (isFinite(hlsDur) && hlsDur > 0) return hlsDur;
+            }
+            return 0;
+        }
 
         function toggleAutoPlayNext() {
             autoPlayNextEnabled = !autoPlayNextEnabled;
@@ -12745,7 +12817,12 @@
 
         function getNextEpisodeInfo() {
             if (activeAnime && activeEpisode) {
-                const targetEpNum = (activeEpisode.episode || 1) + 1;
+                const curNum = activeEpisode.episode || 1;
+                const targetEpNum = curNum + 1;
+                const eps = activeAnime.episodes || [];
+                if (eps.length > 0 && !eps.some(e => e.episode === targetEpNum)) {
+                    return null; // Último episodio alcanzado
+                }
                 const seriesTitle = activeAnime.title || activeAnime.name || 'Anime';
                 return { seriesTitle, nextEpNum: targetEpNum, epTitle: `Episodio ${targetEpNum}` };
             }
@@ -12762,9 +12839,9 @@
             return null;
         }
 
-        function startNextEpisodeCountdown() {
-            cancelNextEpisodeCountdown();
-            if (!autoPlayNextEnabled || !isCurrentPlaybackSeries()) return;
+        function startNextEpisodeCountdown(seconds = 5) {
+            if (nextEpCountdownTimer) return;
+            if (!autoPlayNextEnabled || !isCurrentPlaybackSeries() || nextEpAutoTriggered || nextEpCancelledForThisEpisode) return;
 
             const nextInfo = getNextEpisodeInfo();
             if (!nextInfo) return;
@@ -12779,7 +12856,8 @@
 
             if (seriesEl) seriesEl.textContent = nextInfo.seriesTitle || 'Serie';
             if (titleEl) titleEl.textContent = nextInfo.epTitle || `Episodio ${nextInfo.nextEpNum}`;
-            if (secDisp) secDisp.textContent = '5';
+            const initSec = Math.max(1, Math.round(seconds));
+            if (secDisp) secDisp.textContent = String(initSec);
             if (fill) fill.style.width = '0%';
 
             card.style.display = 'block';
@@ -12790,14 +12868,14 @@
             }
 
             const startTime = Date.now();
-            const totalDuration = 5000;
+            const totalDuration = initSec * 1000;
 
             nextEpCountdownTimer = setInterval(() => {
                 const elapsed = Date.now() - startTime;
                 const remaining = Math.max(0, totalDuration - elapsed);
                 const remSec = Math.ceil(remaining / 1000);
 
-                if (secDisp) secDisp.textContent = remSec;
+                if (secDisp) secDisp.textContent = String(remSec);
                 if (fill) fill.style.width = `${((totalDuration - remaining) / totalDuration) * 100}%`;
 
                 if (remaining <= 0) {
@@ -12807,16 +12885,21 @@
             }, 100);
         }
 
-        function cancelNextEpisodeCountdown() {
+        function cancelNextEpisodeCountdown(userCancelled = false) {
             if (nextEpCountdownTimer) {
                 clearInterval(nextEpCountdownTimer);
                 nextEpCountdownTimer = null;
+            }
+            if (userCancelled) {
+                nextEpCancelledForThisEpisode = true;
             }
             const card = document.getElementById('nextEpCard');
             if (card) card.style.display = 'none';
         }
 
         function triggerNextEpisodeNow() {
+            if (nextEpAutoTriggered) return;
+            nextEpAutoTriggered = true;
             cancelNextEpisodeCountdown();
             playAdjacentEpisode(1);
         }
@@ -12923,6 +13006,8 @@
         }
 
         function closePlayer() {
+            nextEpAutoTriggered = false;
+            nextEpCancelledForThisEpisode = false;
             cancelNextEpisodeCountdown();
             stopAlignmentPolling();
             clearTimeout(playbackWatchdog);
@@ -12962,7 +13047,20 @@
                     const ramPct = data.buffer_pct || 0;
                     document.getElementById('ramScrubberFill').style.width = `${Math.min(100, ramPct)}%`;
                 } catch(e) {}
-            }, 1500);
+
+                // AutoPlay Heartbeat Guard: Si el video está en los últimos segundos o detenido al final
+                if (video && autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
+                    const cur = video.currentTime || 0;
+                    const dur = getEffectiveVideoDuration();
+                    if (dur > 45 && cur > 30) {
+                        const rem = dur - cur;
+                        if (rem <= 2.5 || (video.paused && rem <= 7.0)) {
+                            console.log(`[AUTOPLAY HEARTBEAT] Video finalizado o detenido al final (rem=${rem.toFixed(1)}s, paused=${video.paused}). Avanzando al siguiente episodio...`);
+                            triggerNextEpisodeNow();
+                        }
+                    }
+                }
+            }, 1000);
         }
 
         // Auto-hide de Controles OSD en inactividad (Apple TV Style)
@@ -14702,6 +14800,9 @@
         }
 
         async function launchTmdbPlayback(item, season = null, episode = null, server = 'direct_native', customSub = null) {
+            nextEpAutoTriggered = false;
+            nextEpCancelledForThisEpisode = false;
+            cancelNextEpisodeCountdown();
             activeAnime = null;
             activeEpisode = null;
             currentTmdbPlaying = { item, season, episode, server };
@@ -14744,6 +14845,7 @@
             document.getElementById('playerSeriesTitle').textContent = title;
             document.getElementById('playerEpTitle').textContent = `${epLabel} • Conectando Stream...`;
             modal.classList.add('active');
+            startStatsPolling();
 
             if (wantSubs && !customSub) {
                 autoSearchAndAnchorSpanishSub(0);
@@ -15123,6 +15225,18 @@
                             hlsPlayer.subtitleTrack = -1;
                         }
                         enforceSpanishTracks(video);
+                    });
+                    hlsPlayer.on(Hls.Events.BUFFER_EOS, () => {
+                        console.log('[AUTOPLAY] TMDB/Torrent HLS BUFFER_EOS alcanzado');
+                        if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
+                            const cur = video ? (video.currentTime || 0) : 0;
+                            const dur = getEffectiveVideoDuration();
+                            if (!dur || dur - cur <= 15.0) {
+                                if (!nextEpCountdownTimer) {
+                                    startNextEpisodeCountdown(3);
+                                }
+                            }
+                        }
                     });
                     hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                         if (data.fatal) {
@@ -16001,6 +16115,9 @@ async function loadSoberanoTorrentList(id, type = 'movie', s = 1, e = 1) {
 }
 
 async function launchSoberanoTorrentPlayback(torrentData, item, season = null, episode = null, stream = null) {
+    nextEpAutoTriggered = false;
+    nextEpCancelledForThisEpisode = false;
+    cancelNextEpisodeCountdown();
     activeAnime = null;
     activeEpisode = null;
     const activeHash = (torrentData.infoHash || (stream && stream.infoHash) || "").toLowerCase();
@@ -16038,6 +16155,7 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     document.getElementById("playerSeriesTitle").textContent = title;
     document.getElementById("playerEpTitle").textContent = `⚡ Torrent RAM: ${torrentData.filename || (stream && stream.filename) || title} (👤 ${torrentData.numPeers || (stream && stream.seeds) || 0} seeds)`;
     modal.classList.add("active");
+    startStatsPolling();
 
     recordTmdbHistory(item, type, season, episode);
 

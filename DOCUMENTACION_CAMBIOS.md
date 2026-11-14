@@ -213,11 +213,16 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 ### ⚙️ ¿Cómo funciona?
 1. **Detección Dinámica de Series (`isCurrentPlaybackSeries`):**
    * El botón `Auto Sig: ON` y los botones de cambio de episodio solo se muestran cuando se está reproduciendo una serie (Anime del Vault, Serie TMDB o Serie Torrent), ocultándose automáticamente en películas individuales.
-2. **Tarjeta de Cuenta Regresiva (`#nextEpCard`):**
-   * Al finalizar el video (`video.onended`), si la autoreproducción está activa (`autoPlayNextEnabled = true`), aparece la tarjeta flotante en la esquina inferior derecha con desenfoque de cristal (`backdrop-filter: blur(28px)`).
-   * La barra de progreso se llena suavemente de 0% a 100% en 5 segundos.
-   * El foco del control remoto se coloca automáticamente en `Reproducir ya`, por lo que pulsar la tecla OK/Enter del Magic Remote avanza inmediatamente al siguiente episodio sin esperar los 5 segundos.
-3. **Soporte Universal de Transición:**
+2. **Motor Multi-Capa de Detección del Fin del Episodio (Sin Bloqueos):**
+   * **Capa 1 (Pre-roll Créditos en `timeupdate`):** Al restar $\le 15$ segundos de video (créditos finales), despliega la tarjeta interactiva flotante Apple TV en la esquina inferior derecha con cuenta regresiva animada de 5 segundos. Si el usuario no hace nada, transiciona limpiamente al siguiente capítulo.
+   * **Capa 2 (Límite Absoluto $\le 1.5$s):** Si el video llega a 1.5s del final sin interacción, avanza de inmediato.
+   * **Capa 3 (EOF Pause Guard):** En transmisiones HLS/P2P de webOS donde el stream finaliza pero el navegador se pausa sin emitir el evento `ended` nativo (debido a diferencias de milisegundos entre pistas de audio y video), detecta la pausa en los últimos 4 segundos y avanza automáticamente.
+   * **Capa 4 (`BUFFER_EOS` en Hls.js):** Detecta cuando se han descargado y renderizado todos los fragmentos del buffer HLS en Anime y Torrents.
+   * **Capa 5 (Heartbeat Watchdog 1s en `startStatsPolling`):** Supervisor continuo que verifica cada segundo el estado del video; si se estanca al final, ejecuta `triggerNextEpisodeNow()`.
+3. **Tarjeta de Cuenta Regresiva (`#nextEpCard`):**
+   * Con desenfoque de cristal (`backdrop-filter: blur(28px)`) y barra de progreso animada.
+   * El foco del control remoto se coloca en `[ ▶ Reproducir ya ]`; al presionar OK/Enter avanza sin esperar los 5 segundos. Si se presiona `[ Cancelar ]` o Volver (Back), la tarjeta se oculta para ese episodio.
+4. **Soporte Universal de Transición:**
    * **Anime (Vault / JKanime):** Localiza el siguiente capítulo y arranca la reproducción con `launchEpisodePlayback`.
    * **Series Web TMDB:** Resuelve y carga el nuevo capítulo mediante `launchTmdbPlayback` (corrigiendo el orden de parámetros `season` y `episode`).
    * **Torrents P2P en RAM (`autoPlayNextTorrentEpisode`):** Consulta el enjambre de torrents para `T{season} E{episode}`, selecciona automáticamente la mejor fuente (1080p con mayores seeds) y la envía directo a la memoria RAM de la Mac M3 sin abrir modales ni interrumpir al usuario. Si no encuentra semillas automáticas, abre el selector directamente en el nuevo capítulo.
