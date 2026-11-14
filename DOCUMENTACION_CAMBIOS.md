@@ -224,7 +224,40 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 9. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 9. Persistencia e Inferencia Inteligente de Subtítulos entre Capítulos
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`userSubtitlePreference`, `setUserSubtitlePreference`, `shouldAutoEnableSubtitles`, `autoSearchAndAnchorSpanishSub`, `toggleSubtitles`, `launchEpisodePlayback`, `launchTmdbPlayback`, `launchSoberanoTorrentPlayback`, `playSoberanoTorrent`)
+
+### 🎯 ¿Para qué sirve?
+* Elimina la molestia de tener que activar los subtítulos manualmente en cada nuevo episodio.
+* **Inferencia automática:** Si en el primer capítulo de cualquier serie decides encender los subtítulos en español (o si se anclan automáticamente), el reproductor **intuye que en todos los capítulos siguientes también quieres subtítulos**.
+* Al avanzar al siguiente capítulo (por autoreproducción continua, pulsar "Siguiente" o cambiar de episodio), el sistema busca, sincroniza y ancla de inmediato los subtítulos en español sin que tengas que tocar nada.
+* Si en algún momento decides apagarlos (pulsando el botón de subtítulos o la tecla Amarilla del Magic Remote), el sistema actualiza tu preferencia a `OFF` y los siguientes capítulos respetarán tu decisión sin forzarte subtítulos no deseados.
+* Funciona de forma idéntica en los 3 motores de streaming:
+  1. **Anime Vault** (`launchEpisodePlayback`)
+  2. **Series Web TMDB** (`launchTmdbPlayback`)
+  3. **Torrents P2P en RAM Soberano** (`launchSoberanoTorrentPlayback`)
+
+### ⚙️ ¿Cómo funciona?
+1. **Memoria de Preferencia en Silicio Local (`localStorage`):**
+   * Se almacena la clave `'soberano_subtitles_user_pref'`:
+     * Al encender subtítulos $\to$ `setUserSubtitlePreference(true)`.
+     * Al apagar subtítulos $\to$ `setUserSubtitlePreference(false)`.
+     * Al anclar exitosamente una pista en español desde la API Soberano $\to$ se confirma `setUserSubtitlePreference(true)`.
+2. **Inferencia en el Arranque de Cada Capítulo:**
+   * Al iniciar un nuevo episodio, cada motor consulta `shouldAutoEnableSubtitles()`.
+   * Si es `true`:
+     * El botón de subtítulos pasa inmediatamente a estado de carga: `[ <i class="fa fa-spinner"></i> Buscando ES... ]`.
+     * Se despacha en segundo plano la consulta a la API unificada `/api/subtitles/auto` con el ID, temporada, capítulo y título de la serie.
+     * En cuanto se parsea el archivo WebVTT, se ancla al motor nativo del televisor y se activa el overlay DOM de alta legibilidad Apple TV.
+3. **Regla de Oro Anti-Duplicidad en Torrents:**
+   * Si un torrent ya tiene subtítulos quemados/incrustados por transcodificación (`burned === true`), el sistema muestra el botón como `ON`, pero **suprime las pistas DOM** para evitar que se superpongan dos textos simultáneos en la pantalla del televisor.
+   * Si el torrent viene con audio puro en español (`is_es && !is_dual`), no fuerza subtítulos innecesarios salvo que el usuario lo solicite.
+
+---
+
+## 10. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash

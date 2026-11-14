@@ -11696,6 +11696,21 @@
         let isSearchingAutoSub = false;
         let currentSubBlobUrl = null;
 
+        // Persistencia e Inferencia de Subtítulos (Apple TV / Netflix)
+        // Si el usuario activa subtítulos en un capítulo, persisten automáticamente en los siguientes.
+        let userSubtitlePreference = localStorage.getItem('soberano_subtitles_user_pref') === 'true';
+
+        function setUserSubtitlePreference(enabled) {
+            userSubtitlePreference = !!enabled;
+            try {
+                localStorage.setItem('soberano_subtitles_user_pref', userSubtitlePreference ? 'true' : 'false');
+            } catch(e) {}
+        }
+
+        function shouldAutoEnableSubtitles() {
+            return userSubtitlePreference || (localStorage.getItem('soberano_subtitles_user_pref') === 'true');
+        }
+
         function updateSubButtonsUI(state = 'off', customPillText = null) {
             const btn = document.getElementById('btnSubToggle');
             const txt = document.getElementById('subStatusText');
@@ -11913,6 +11928,7 @@
                                 currentSpanishSubIndex = typeof data.selected_index === 'number' ? data.selected_index : 0;
                                 currentCustomSub = data.vtt_url || null;
                                 subtitlesEnabled = true;
+                                setUserSubtitlePreference(true);
                                 attachNativeSpanishTrack(data.vtt_content, data.vtt_url);
                                 updateSubButtonsUI('on');
                                 renderActiveSubCueNow();
@@ -11962,6 +11978,7 @@
                                 });
                             }
                             subtitlesEnabled = true;
+                            setUserSubtitlePreference(true);
                             attachNativeSpanishTrack(vttText, targetSubUrl);
                             updateSubButtonsUI('on');
                             renderActiveSubCueNow();
@@ -12022,6 +12039,7 @@
             }
             if (!subtitlesEnabled) {
                 // El usuario presionó el botón para ACTIVAR subtítulos:
+                setUserSubtitlePreference(true);
                 // Si aún no se han descargado, buscarlos y anclarlos automáticamente en español
                 if (!currentSubCues || currentSubCues.length === 0) {
                     autoSearchAndAnchorSpanishSub(0);
@@ -12035,6 +12053,7 @@
                 showToast(`✅ Subtítulos en español anclados (${currentSubCues.length} líneas)`);
             } else {
                 // El usuario presionó el botón para DESACTIVAR subtítulos
+                setUserSubtitlePreference(false);
                 subtitlesEnabled = false;
                 updateSubButtonsUI('off');
                 renderActiveSubCueNow();
@@ -12211,11 +12230,12 @@
             currentTmdbPlaying = null;
             activeAnime = anime;
             activeEpisode = episode;
-            subtitlesEnabled = false;
             currentSubCues = [];
             availableSpanishSubs = [];
             currentSpanishSubIndex = 0;
-            updateSubButtonsUI('off');
+            const wantSubs = shouldAutoEnableSubtitles();
+            subtitlesEnabled = wantSubs;
+            updateSubButtonsUI(wantSubs ? 'loading' : 'off');
             updatePlayerSeriesControlsVisibility();
 
             const modal = document.getElementById('playerModal');
@@ -12261,11 +12281,11 @@
                     });
                 }
 
-                // Gestión Bajo Demanda de Subtítulos (Solo se activan si el usuario presiona el botón)
+                // Gestión de Subtítulos con Inferencia de Preferencia del Usuario
                 currentSubCues = [];
-                subtitlesEnabled = false;
+                subtitlesEnabled = wantSubs;
                 const subOverlay = document.getElementById('soberanoSubOverlay');
-                if (subOverlay) {
+                if (subOverlay && !wantSubs) {
                     subOverlay.style.display = 'none';
                     subOverlay.removeAttribute('data-active-text');
                     subOverlay.innerHTML = '';
@@ -12284,7 +12304,7 @@
                     availableSpanishSubs = [{ index: 0, label: subLabel, url: subUrlToLoad }];
                     currentCustomSub = subUrlToLoad;
                 }
-                updateSubButtonsUI('off');
+                updateSubButtonsUI(wantSubs ? 'loading' : 'off');
             } catch(e) {
                 console.warn('Error resolviendo stream_info:', e);
             }
@@ -12359,6 +12379,9 @@
             // Iniciar flujo con aceleración por hardware en iPadOS
             if (directServersQueue.length > 0) {
                 executeDirectPlayback(0, resumeTime);
+                if (wantSubs) {
+                    autoSearchAndAnchorSpanishSub(0);
+                }
             } else {
                 triggerIframeFallback();
             }
@@ -14682,9 +14705,10 @@
             activeAnime = null;
             activeEpisode = null;
             currentTmdbPlaying = { item, season, episode, server };
-            subtitlesEnabled = false;
             currentSubCues = [];
-            updateSubButtonsUI('off');
+            const wantSubs = shouldAutoEnableSubtitles();
+            subtitlesEnabled = wantSubs;
+            updateSubButtonsUI(wantSubs ? 'loading' : 'off');
             updatePlayerSeriesControlsVisibility();
             const type = item.media_type || (season ? 'tv' : (item.title ? 'movie' : 'tv'));
             const s = season || 1;
@@ -14720,6 +14744,10 @@
             document.getElementById('playerSeriesTitle').textContent = title;
             document.getElementById('playerEpTitle').textContent = `${epLabel} • Conectando Stream...`;
             modal.classList.add('active');
+
+            if (wantSubs && !customSub) {
+                autoSearchAndAnchorSpanishSub(0);
+            }
 
             // Actualizar botones de servidor en el reproductor
             document.querySelectorAll('.player-server-pills .server-pill-btn').forEach(btn => {
@@ -14832,12 +14860,11 @@
                     fallbackIframe.src = 'about:blank';
                 }
 
-                // SOBERANO SUBTITLES ENGINE (MODO MANUAL BAJO DEMANDA):
-                // Subtítulos desactivados por defecto al iniciar para evitar duplicidad en series que ya traen subtítulos.
-                // Solo se buscan, descargan y anclan en español cuando el usuario presiona el botón de subtítulos.
+                // SOBERANO SUBTITLES ENGINE:
+                // Si el usuario tiene activa la preferencia de subtítulos, mantenerla; si no, mantener desactivado.
                 Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
                 currentSubCues = [];
-                subtitlesEnabled = false;
+                subtitlesEnabled = wantSubs;
                 
                 // Recuperar ajuste manual guardado
                 let savedOffset = 0.0;
@@ -14850,12 +14877,12 @@
                 if (badge) badge.textContent = (currentSubSyncOffset >= 0 ? '+' : '') + currentSubSyncOffset.toFixed(1) + 's';
 
                 const subOverlayEl = document.getElementById('soberanoSubOverlay');
-                if (subOverlayEl) {
+                if (subOverlayEl && !wantSubs) {
                     subOverlayEl.style.display = 'none';
                     subOverlayEl.removeAttribute('data-active-text');
                     subOverlayEl.innerHTML = '';
                 }
-                updateSubButtonsUI('off');
+                updateSubButtonsUI(wantSubs ? 'loading' : 'off');
 
                 // Si el usuario subió manualmente un archivo propio antes de reproducir, anclarlo
                 if (window.isUserUploadedSub && customSub) {
@@ -15980,11 +16007,12 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     const prevQuery = (currentTmdbPlaying && currentTmdbPlaying.hash === activeHash) ? currentTmdbPlaying.playQuery : (torrentData.__playQuery || null);
     const isBurned = !!torrentData.burned;
     currentTmdbPlaying = { item, season, episode, server: "torrent_p2p", torrentRetries: 0, hash: activeHash, burned: isBurned, playQuery: prevQuery || torrentData.__playQuery || null };
+    const wantSubs = isBurned ? true : shouldAutoEnableSubtitles();
     // REGLA SUPREMA ANTI-DUPLICIDAD: Si los subtítulos ya están quemados (burned) en el video, jamás habilitar overlays ni pistas
-    subtitlesEnabled = false;
+    subtitlesEnabled = isBurned ? false : wantSubs;
     currentCustomSub = null;
     currentSubCues = [];
-    updateSubButtonsUI(isBurned ? "on" : "off");
+    updateSubButtonsUI(isBurned ? "on" : (wantSubs ? "loading" : "off"));
     updatePlayerSeriesControlsVisibility();
     const type = item.media_type || (season ? "tv" : "movie");
     const s = season || 1;
@@ -16029,8 +16057,8 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     executeTmdbDirectPlayback(0, 0);
     if (!isBurned) {
         const isPureEsAudio = !!(stream && stream.is_es && !stream.is_dual);
-        if (!isPureEsAudio) {
-            // Sin subtítulos quemados y audio no exclusivamente español: anclar subtítulos en español sin duplicidad
+        if (!isPureEsAudio && wantSubs) {
+            // Sin subtítulos quemados y audio no exclusivamente español: anclar subtítulos en español según preferencia
             autoSearchAndAnchorSpanishSub(0);
         } else {
             subtitlesEnabled = false;
@@ -16063,7 +16091,8 @@ async function playSoberanoTorrent(streamIdx) {
 
     try {
         const isEsParam = (stream.is_es && !stream.is_dual) ? '1' : '0';
-        const wantBurnOnStart = isLocalDomSubModeForTorrent() ? 0 : 1;
+        const wantSubsPref = shouldAutoEnableSubtitles();
+        const wantBurnOnStart = (!isLocalDomSubModeForTorrent() && wantSubsPref) ? 1 : 0;
         const baseQ = `${PROXY_BASE}/api/soberano/play?id=${encodeURIComponent(activeSoberanoItem.id || "")}&hash=${encodeURIComponent(stream.infoHash || "")}&idx=${stream.fileIdx !== undefined ? stream.fileIdx : -1}&title=${encodeURIComponent(title)}&type=${type}&s=${s}&e=${e}&is_es=${isEsParam}&quality=${encodeURIComponent(stream.quality || "1080p")}&seeds=${stream.seeds || 0}`;
         const qUrl = `${baseQ}&burn=${wantBurnOnStart}&off=${currentSubSyncOffset || 0}`;
         const ctrl = new AbortController();
