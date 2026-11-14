@@ -142,22 +142,39 @@
         .btn-apple-secondary:focus,
         .nav-item:focus, 
         .hero-btn:focus,
-        .shelf-arrow:focus,
-        .icon-btn:focus,
-        .season-tab:focus,
-        .filter-pill:focus,
-        .type-pill:focus,
-        .genre-chip:focus,
-        .btn-page-nav:focus,
+        /* Tarjetas de Contenido en Foco (Elevación 3D Apple TV sin solapamiento) */
+        .tv-card:focus, .tv-card.tv-focused,
+        .catalog-card:focus, .catalog-card.tv-focused,
+        .tv-poster-card:focus, .tv-poster-card.tv-focused {
+            outline: none !important;
+            transform: translate3d(0, -6px, 0) scale3d(1.04, 1.04, 1) !important;
+            box-shadow: 0 0 0 3px #38bdf8, 0 12px 30px rgba(0, 0, 0, 0.9) !important;
+            z-index: 30 !important;
+            border-color: #38bdf8 !important;
+            will-change: transform;
+        }
+
+        /* Botones, Pestañas y Filas Minimalistas (CERO superposición, CERO distorsión) */
+        .season-tab:focus, .season-tab.tv-focused,
+        .filter-pill:focus, .filter-pill.tv-focused,
+        .type-pill:focus, .type-pill.tv-focused,
+        .genre-chip:focus, .genre-chip.tv-focused,
+        .btn-page-nav:focus, .btn-page-nav.tv-focused,
+        .btn-apple-primary:focus, .btn-apple-primary.tv-focused,
+        .btn-apple-secondary:focus, .btn-apple-secondary.tv-focused,
+        .btn-ctrl:focus, .btn-ctrl.tv-focused,
+        .ep-row-card:focus, .ep-row-card.tv-focused,
+        .soberano-torrent-item:focus, .soberano-torrent-item.tv-focused,
+        .sheet-close-btn:focus, .sheet-close-btn.tv-focused,
+        .search-close-x:focus, .search-close-x.tv-focused,
         button:focus,
-        [tabindex="0"]:focus,
         .tv-focused {
             outline: none !important;
-            transform: translate3d(0, -6px, 0) scale3d(1.05, 1.05, 1) !important;
-            box-shadow: 0 0 0 3.5px #ffffff, 0 10px 24px rgba(0, 0, 0, 0.9) !important;
-            z-index: 50 !important;
-            border-color: #ffffff !important;
-            will-change: transform;
+            transform: none !important;
+            box-shadow: 0 0 0 2.5px #38bdf8, 0 4px 16px rgba(56, 189, 248, 0.35) !important;
+            z-index: 5 !important;
+            border-color: #38bdf8 !important;
+            will-change: auto;
         }
 
         .nav-item:focus, .nav-item.tv-focused {
@@ -1542,16 +1559,16 @@
         }
 
         .season-tab {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1.5px solid rgba(255, 255, 255, 0.14);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             color: var(--text-secondary);
-            font-size: 14px;
+            font-size: 13.5px;
             font-weight: 600;
-            padding: 9px 18px;
-            border-radius: 14px;
+            padding: 8px 16px;
+            border-radius: 12px;
             cursor: pointer;
             white-space: nowrap;
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: all 0.15s ease;
             flex-shrink: 0;
             touch-action: manipulation;
             display: inline-flex;
@@ -1560,15 +1577,25 @@
         }
 
         .season-tab:active {
-            transform: scale(0.96);
+            transform: scale(0.98);
+        }
+
+        .season-tab:focus,
+        .season-tab.tv-focused {
+            transform: none !important;
+            background: rgba(56, 189, 248, 0.22) !important;
+            border-color: #38bdf8 !important;
+            color: #ffffff !important;
+            box-shadow: 0 0 0 2px #38bdf8, 0 4px 14px rgba(56, 189, 248, 0.35) !important;
+            z-index: 2 !important;
         }
 
         .season-tab.active {
             background: #38bdf8 !important;
             color: #031018 !important;
             border-color: #38bdf8 !important;
-            font-weight: 800 !important;
-            box-shadow: 0 4px 18px rgba(56, 189, 248, 0.55), 0 0 10px rgba(56, 189, 248, 0.3) !important;
+            font-weight: 700 !important;
+            box-shadow: 0 2px 10px rgba(56, 189, 248, 0.4) !important;
         }
 
         .season-tab .tab-ep-count {
@@ -1588,7 +1615,7 @@
         .episodes-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
             margin-top: 10px;
         }
 
@@ -1596,22 +1623,24 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 20px;
-            border-radius: 14px;
-            background: rgba(255, 255, 255, 0.05);
+            padding: 12px 18px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.08);
             cursor: pointer;
-            transition: all 0.15s ease;
+            transition: background 0.15s ease, border-color 0.15s ease;
             outline: none;
-            gap: 18px;
+            gap: 16px;
         }
 
         .ep-row-card:hover,
-        .ep-row-card:focus {
-            background: rgba(255, 255, 255, 0.16) !important;
-            border-color: #ffffff !important;
-            box-shadow: 0 0 24px rgba(255, 255, 255, 0.3) !important;
-            transform: scale(1.01) !important;
+        .ep-row-card:focus,
+        .ep-row-card.tv-focused {
+            transform: none !important;
+            background: rgba(56, 189, 248, 0.14) !important;
+            border-color: #38bdf8 !important;
+            box-shadow: 0 0 0 2px #38bdf8, 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+            z-index: 2 !important;
         }
 
         .ep-row-left {
@@ -1738,6 +1767,30 @@
             box-shadow: 0 0 0 3px rgba(232, 121, 249, 0.5), 0 12px 36px rgba(0, 0, 0, 0.7) !important;
         }
 
+        .soberano-torrent-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            gap: 16px;
+            outline: none;
+        }
+
+        .soberano-torrent-item:focus,
+        .soberano-torrent-item.tv-focused {
+            transform: none !important;
+            background: rgba(217, 70, 239, 0.16) !important;
+            border-color: #e879f9 !important;
+            box-shadow: 0 0 0 2.5px #e879f9, 0 6px 20px rgba(217, 70, 239, 0.3) !important;
+            z-index: 2 !important;
+        }
+
         .search-icon-pos {
             position: absolute;
             left: 20px;
@@ -1761,12 +1814,30 @@
 
         .search-results-grid {
             width: 100%;
-            max-width: 1100px;
+            max-width: 1200px;
+            flex: 1 1 0;
+            min-height: 0;
+            max-height: calc(100vh - 150px);
             overflow-y: auto;
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 22px;
-            padding-bottom: 40px;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 20px;
+            padding: 10px 10px 80px 10px;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .search-results-grid::-webkit-scrollbar {
+            display: none;
+            width: 0;
+            height: 0;
+        }
+
+        .search-results-grid .tv-poster-card,
+        .search-results-grid .tv-card {
+            flex: none !important;
+            width: 100% !important;
+            margin: 0 !important;
         }
 
         /* Spinner */
@@ -3426,19 +3497,16 @@
                 font-size: 12.5px !important;
             }
 
-            /* Barra y Solapas de Temporadas en Móvil - Sticky Apple HIG Única y Limpia */
+            /* Barra y Solapas de Temporadas - Flujo Limpio Sin Superposiciones */
             .season-bar-container {
-                position: -webkit-sticky !important;
-                position: sticky !important;
-                top: -14px !important;
-                z-index: 30 !important;
-                background: rgba(13, 18, 28, 0.96) !important;
-                backdrop-filter: blur(25px) saturate(180%) !important;
-                -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
-                margin: 0 -16px 10px -16px !important;
-                padding: 10px 16px 8px 16px !important;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+                position: relative !important;
+                top: auto !important;
+                z-index: 5 !important;
+                background: transparent !important;
+                margin: 6px 0 10px 0 !important;
+                padding: 0 !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+                box-shadow: none !important;
             }
 
             .season-bar-header {
@@ -11599,6 +11667,12 @@
                     closeSheet();
                     launchEpisodePlayback(activeAnime, ep);
                 };
+                card.onkeydown = (e) => {
+                    if (e.key === 'Enter' || e.keyCode === 13) {
+                        e.preventDefault();
+                        card.onclick();
+                    }
+                };
                 card.innerHTML = `
                     <div class="ep-row-left">
                         <span class="ep-num-pill">E${ep.episode}</span>
@@ -11606,7 +11680,7 @@
                     </div>
                     <div class="ep-row-right">
                         <span class="ep-dur-tag">24 min</span>
-                        <button class="btn-ep-play"><i class="fa fa-play"></i></button>
+                        <div class="btn-ep-play" style="pointer-events:none;"><i class="fa fa-play"></i></div>
                     </div>
                 `;
                 listContainer.appendChild(card);
@@ -13205,6 +13279,12 @@
                     openScrapedAnimeDetails(item);
                 }
             };
+            card.onkeydown = (e) => {
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                    e.preventDefault();
+                    card.onclick();
+                }
+            };
             const title = (item.title && item.title.toLowerCase() !== 'ver ahora') ? item.title : (item.slug || '').replace(/-/g, ' ');
             const safeId = (item.id || item.slug || '').replace(/'/g, '');
             const safeTitle = title.replace(/'/g, '');
@@ -13585,14 +13665,16 @@
         // High-Performance Euclidean Nearest-Neighbor for Smart TVs
         // ========================================================
         const SpatialNav = {
-            focusableSelector: '.nav-item, .tv-card, .tv-poster-card, .catalog-card, .ep-row-card, .btn-apple-primary, .btn-apple-secondary, .btn-ctrl, .season-tab, .filter-pill, .type-pill, .genre-chip, .btn-page-nav, .sheet-close-btn, .search-close-x, button, input, textarea, [tabindex="0"]',
+            focusableSelector: '.nav-item, .tv-card, .tv-poster-card, .catalog-card, .ep-row-card, .soberano-torrent-item, .btn-apple-primary, .btn-apple-secondary, .btn-ctrl, .season-tab, .filter-pill, .type-pill, .genre-chip, .btn-page-nav, .sheet-close-btn, .search-close-x, button, input, textarea, [tabindex="0"]',
 
             getActiveContext() {
                 const playerModal = document.getElementById('playerModal');
                 const sheetOverlay = document.getElementById('sheetOverlay');
                 const searchModal = document.getElementById('searchModal');
+                const swarmModal = document.getElementById('soberanoSwarmModal');
 
                 if (playerModal && playerModal.classList.contains('active')) return playerModal;
+                if (swarmModal && swarmModal.classList.contains('active')) return swarmModal;
                 if (sheetOverlay && sheetOverlay.classList.contains('active')) return sheetOverlay;
                 if (searchModal && searchModal.classList.contains('active')) return searchModal;
                 return document.body;
@@ -13623,8 +13705,16 @@
 
                 const active = document.activeElement;
                 if (!active || !candidates.includes(active)) {
-                    // Si no hay foco activo en este contexto, buscar el primer candidato prioritario
-                    const first = candidates.find(el => el.classList.contains('btn-apple-primary') || el.classList.contains('season-tab') || el.classList.contains('tv-card')) || candidates[0];
+                    // Si no hay foco activo en este contexto, buscar el primer candidato prioritario (tarjetas, solapas o filas de contenido)
+                    const first = candidates.find(el => 
+                        el.classList.contains('tv-poster-card') ||
+                        el.classList.contains('tv-card') || 
+                        el.classList.contains('catalog-card') || 
+                        el.classList.contains('ep-row-card') ||
+                        el.classList.contains('soberano-torrent-item') ||
+                        el.classList.contains('season-tab') || 
+                        el.classList.contains('btn-apple-primary')
+                    ) || candidates.find(el => el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') || candidates[0];
                     if (first) this.focusElement(first);
                     return;
                 }
@@ -13717,23 +13807,27 @@
                 } catch(e) {}
 
                 // Desplazamiento horizontal para elementos en carrusel
-                const shelf = el.closest('.shelf-track, .shelf-scroll, .genres-track, .catalog-filter-bar');
+                const shelf = el.closest('.shelf-track, .shelf-scroll, .genres-track, .catalog-filter-bar, .season-tabs-row');
                 if (shelf) {
                     const shelfRect = shelf.getBoundingClientRect();
                     const elRect = el.getBoundingClientRect();
                     const targetLeft = shelf.scrollLeft + (elRect.left - shelfRect.left) - (shelfRect.width / 2) + (elRect.width / 2);
-                    shelf.scrollTo({ left: targetLeft, behavior: 'auto' });
+                    shelf.scrollTo({ left: targetLeft, behavior: 'smooth' });
                 }
 
-                // Desplazamiento vertical fluido de la ventana si el elemento queda fuera de la zona visible (tvOS Auto-Viewport)
-                const rect = el.getBoundingClientRect();
-                const vh = window.innerHeight || document.documentElement.clientHeight;
-                if (rect.top < 100 || rect.bottom > vh - 100) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                // Auto-desplazamiento vertical dentro de contenedores de lista o cuadrícula
+                const scrollParent = el.closest('.search-results-grid, .episodes-list, #soberanoTorrentList, .sheet-body');
+                if (scrollParent) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                } else {
+                    const rect = el.getBoundingClientRect();
+                    const vh = window.innerHeight || document.documentElement.clientHeight;
+                    if (rect.top < 100 || rect.bottom > vh - 100) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                    }
                 }
 
                 // Sincronización Top Shelf de Apple TV (tvOS 17/18)
-                // Si el foco se encuentra en una tarjeta de contenido, actualizar el Top Shelf Hero
                 if (el.__animeData) {
                     clearTimeout(topShelfDebounceTimer);
                     topShelfDebounceTimer = setTimeout(() => {
@@ -13811,6 +13905,10 @@
                             }
                         } else if (document.activeElement.id === 'universalSearchInput') {
                             document.activeElement.blur();
+                            const firstCard = document.querySelector('#searchResultsGrid .tv-poster-card, #searchResultsGrid .tv-card, #searchResultsGrid [tabindex="0"]');
+                            if (firstCard && typeof SpatialNav !== 'undefined') {
+                                SpatialNav.focusElement(firstCard);
+                            }
                         }
                         return;
                     }
@@ -13821,9 +13919,29 @@
                         SpatialNav.navigate('up');
                         return;
                     }
-                    // Flecha abajo: desenfocar e ir hacia los filtros o resultados
+                    // Flecha abajo: saltar directamente hacia el contenido / resultados
                     if (e.keyCode === 40) {
                         e.preventDefault();
+                        if (document.activeElement.id === 'universalSearchInput') {
+                            document.activeElement.blur();
+                            const firstCard = document.querySelector('#searchResultsGrid .tv-poster-card, #searchResultsGrid .tv-card, #searchResultsGrid [tabindex="0"]');
+                            if (firstCard && typeof SpatialNav !== 'undefined') {
+                                SpatialNav.focusElement(firstCard);
+                            } else {
+                                SpatialNav.navigate('down');
+                            }
+                            return;
+                        }
+                        if (document.activeElement.id === 'soberanoSearchInput') {
+                            document.activeElement.blur();
+                            const firstTarget = document.querySelector('#chipSoberanoSpanish, #gridSoberanoResults .tv-card, #gridSoberanoResults .tv-poster-card');
+                            if (firstTarget && typeof SpatialNav !== 'undefined') {
+                                SpatialNav.focusElement(firstTarget);
+                            } else {
+                                SpatialNav.navigate('down');
+                            }
+                            return;
+                        }
                         document.activeElement.blur();
                         SpatialNav.navigate('down');
                         return;
@@ -14748,6 +14866,12 @@
                         const srv = document.getElementById('sheetServerSelect') ? document.getElementById('sheetServerSelect').value : 'direct_native';
                         launchTmdbPlayback(activeTmdbItem, seasonNum, ep.episode_number, srv);
                     };
+                    card.onkeydown = (e) => {
+                        if (e.key === 'Enter' || e.keyCode === 13) {
+                            e.preventDefault();
+                            card.onclick();
+                        }
+                    };
                     const stillImg = ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : '';
                     let statusBadgeHtml = '';
                     if (ep.air_date) {
@@ -14770,7 +14894,7 @@
                         </div>
                         <div class="ep-row-right" style="display:flex; align-items:center; gap:14px; flex-shrink:0;">
                             <span class="ep-dur-tag" style="font-size:13px; font-weight:600;">${ep.runtime ? ep.runtime + ' min' : 'HD'}</span>
-                            <button class="btn-ep-play" style="width:38px; height:38px; font-size:14px;"><i class="fa fa-play"></i></button>
+                            <div class="btn-ep-play" style="width:38px; height:38px; font-size:14px; pointer-events:none;"><i class="fa fa-play"></i></div>
                         </div>
                     `;
                     listContainer.appendChild(card);
@@ -16161,7 +16285,7 @@ function renderSoberanoTorrentListFromCache() {
         const releaseSource = stream.name || 'Torrentio';
 
         html += `
-            <div class="soberano-torrent-item" onclick="playSoberanoTorrent(${originalIndex})" style="display:flex; justify-content:space-between; align-items:center; padding:14px 18px; margin-bottom:8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:14px; cursor:pointer; transition:all 0.2s; gap:16px;" onmouseover="this.style.background='rgba(217,70,239,0.12)'; this.style.borderColor='rgba(217,70,239,0.4)';" onmouseout="this.style.background='rgba(255,255,255,0.04)'; this.style.borderColor='rgba(255,255,255,0.08)';">
+            <div class="soberano-torrent-item" tabindex="0" onclick="playSoberanoTorrent(${originalIndex})" onkeydown="if(event.key==='Enter'||event.keyCode===13){event.preventDefault();playSoberanoTorrent(${originalIndex});}">
                 <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;">
                     <!-- Fila 1: Badges de Estado (Calidad, Idioma, Seeds, Tamaño) -->
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -16173,7 +16297,7 @@ function renderSoberanoTorrentListFromCache() {
                         ${isTopSeeds ? '<span class="meta-badge" style="background:rgba(48,209,88,0.25); color:#30d158; font-weight:700;"><i class="fa fa-bolt"></i> Máxima Velocidad</span>' : ''}
                     </div>
                     <!-- Fila 2: Nombre y Descripción completa del Archivo (Sin solapamientos, legible y fluido) -->
-                    <div style="font-size:13.5px; font-weight:600; color:#ffffff; line-height:1.4; word-break:break-word; max-height:44px; overflow:hidden; margin:5px 0 4px 0;" title="${escapeHtml(rawTitle)}">
+                    <div style="font-size:13.5px; font-weight:600; color:#ffffff; line-height:1.4; word-break:break-word; max-height:44px; overflow:hidden; margin:4px 0;" title="${escapeHtml(rawTitle)}">
                         ${escapeHtml(rawTitle)}
                     </div>
                     <!-- Fila 3: Metadatos del Tracker y Servidor -->
@@ -16183,10 +16307,10 @@ function renderSoberanoTorrentListFromCache() {
                         <span><i class="fa fa-cloud"></i> ${escapeHtml(releaseSource)}</span>
                     </div>
                 </div>
-                <!-- Botón de Acción Limpio Apple HIG -->
-                <button class="btn-apple-primary" style="padding:10px 18px; font-size:13px; font-weight:700; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; border-radius:10px; background:linear-gradient(135deg, #d946ef, #8b5cf6); box-shadow:0 4px 12px rgba(217,70,239,0.3);">
+                <!-- Botón de Acción Limpio Apple HIG (Sin interferencia ni superposición) -->
+                <div class="btn-apple-primary" style="padding:10px 18px; font-size:13px; font-weight:700; display:inline-flex; align-items:center; gap:6px; flex-shrink:0; border-radius:10px; background:linear-gradient(135deg, #d946ef, #8b5cf6); box-shadow:0 4px 12px rgba(217,70,239,0.3); pointer-events:none;">
                     <i class="fa fa-play"></i> RAM Play
-                </button>
+                </div>
             </div>
         `;
     });

@@ -293,7 +293,33 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 11. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 11. Deslizamiento Fluido en Búsqueda General, Botones Minimalistas y Supresión Total de Superposiciones
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`SpatialNav`, `.search-results-grid`, `.season-tab`, `.ep-row-card`, `.soberano-torrent-item`, `initKeyboardShortcuts`, `openSearchModal`, `openTmdbDetailsSheet`, `renderSheetEpisodes`, `renderSoberanoTorrentListFromCache`)
+
+### 🎯 ¿Para qué sirve?
+* **Deslizamiento Fluido en Búsqueda General:** Corrige el bloqueo que impedía salir de la barra de búsqueda universal hacia la cuadrícula de resultados y deslizarse libremente entre series para seleccionar una. Ahora, al presionar Flecha Abajo o Enter tras buscar, el foco salta de inmediato a la primera tarjeta y permite navegar suavemente en 2D (izquierda, derecha, arriba, abajo) con auto-scroll sincronizado. Al pulsar Flecha Arriba en la primera fila, regresa a la barra de búsqueda de forma intuitiva.
+* **Botones Minimalistas Apple TV HIG:** Transforma los botones, filtros y solapas en elementos planos, nítidos y elegantes con esquinas redondeadas (12px), brillo de borde cian fluorescente (`#38bdf8`) y tipografía legible de alto contraste.
+* **Eliminación Total de la Superposición de Botones:** Suprime el escalado agresivo (`scale3d(1.05)` con elevación de 6px) que causaba que botones adyacentes se montaran unos sobre otros en barras de herramientas, solapas de temporadas y controles multimedia.
+* **Eliminación Total de la Superposición de Listas:**
+  * En la lista de episodios (`sheetEpisodesList`): se eliminó la colisión del botón interno `btn-ep-play`, convirtiendo toda la fila en una sola unidad táctil/D-Pad con `transform: none`, evitando que un episodio tape al anterior.
+  * En el selector de temporadas (`season-bar-container`): se erradicó el posicionamiento pegajoso (`position: sticky`) que hacía que la barra flotara y tapara los episodios mientras se desplazaban.
+  * En la lista de torrents (`soberanoTorrentList`): se integró el botón `RAM Play` como un indicador visual integrado en la fila con `pointer-events: none` y `tabindex="0"` directo en el contenedor, permitiendo recorrer la lista con suavidad total sin saltos ni superposiciones de texto.
+
+### ⚙️ ¿Cómo funciona?
+1. **Bypass Inteligente de Navegación desde la Búsqueda General:**
+   * En `initKeyboardShortcuts()`, cuando el foco está en `#universalSearchInput`:
+     * Al presionar **Enter (13)** o **Flecha Abajo (40)**, desenfoca el input y enfoca directamente la primera tarjeta encontrada en `#searchResultsGrid`.
+     * En `SpatialNav.navigate()`, la selección de candidatos por defecto prioriza tarjetas de contenido (`.tv-poster-card`, `.tv-card`, `.catalog-card`, `.ep-row-card`) por encima de los campos de texto para evitar que el motor devuelva el foco a la barra de entrada.
+2. **Auto-Scroll Suave para Cuadrículas y Listas en `focusElement`:**
+   * Al navegar vertical u horizontalmente por `#searchResultsGrid`, `#sheetEpisodesList` o `#soberanoTorrentList`, `focusElement()` invoca `el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })`, manteniendo siempre visible la tarjeta o episodio enfocado en el centro del campo de visión del televisor.
+3. **Regla de Oro CSS de Foco Minimalista (Zero-Overlap Law):**
+   * Se separó el foco de tarjetas visuales (que sí disfrutan de elevación 3D) del foco de controles interactivos (botones, pestañas, filas y listas), los cuales operan bajo `transform: none !important;` y un marco de foco perimetral de 2.5px que respeta escrupulosamente los límites espaciales de los elementos contiguos.
+
+---
+
+## 12. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash
