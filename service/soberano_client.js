@@ -69,10 +69,30 @@ function createSoberanoCard(item, mediaType = 'movie') {
     return card;
 }
 
+function onSoberanoSearchInputChange(val) {
+    const clearBtn = document.getElementById('btnSoberanoSearchClear');
+    if (clearBtn) {
+        clearBtn.style.display = (val && val.trim().length > 0) ? 'inline-flex' : 'none';
+    }
+}
+
+function clearSoberanoSearch() {
+    const input = document.getElementById('soberanoSearchInput');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('btnSoberanoSearchClear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    const secResults = document.getElementById('sectionSoberanoResults');
+    if (secResults) secResults.style.display = 'none';
+}
+
 function quickSoberanoSearch(term) {
     const input = document.getElementById('soberanoSearchInput');
     if (input) {
         input.value = term;
+        onSoberanoSearchInputChange(term);
         executeSoberanoSearch();
     }
 }

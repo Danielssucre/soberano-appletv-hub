@@ -1714,6 +1714,30 @@
             box-shadow: 0 15px 50px rgba(0, 0, 0, 0.8), 0 0 25px rgba(255, 255, 255, 0.3);
         }
 
+        .soberano-search-field {
+            width: 100%;
+            padding: 16px 95px 16px 22px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1.5px solid rgba(255, 255, 255, 0.18);
+            border-radius: 16px;
+            color: #ffffff;
+            font-size: 16px;
+            outline: none;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            transition: all 0.25s ease;
+            font-family: inherit;
+        }
+
+        .soberano-search-field:focus,
+        .soberano-search-field.tv-focused {
+            transform: none !important;
+            background: rgba(255, 255, 255, 0.15) !important;
+            border-color: #e879f9 !important;
+            box-shadow: 0 0 0 3px rgba(232, 121, 249, 0.5), 0 12px 36px rgba(0, 0, 0, 0.7) !important;
+        }
+
         .search-icon-pos {
             position: absolute;
             left: 20px;
@@ -4064,23 +4088,26 @@
 
                 <!-- Barra de búsqueda omnisciente -->
                 <div style="position:relative; width:100%; max-width:680px; margin:0 auto;">
-                    <input type="text" id="soberanoSearchInput" placeholder="Busca película, serie, anime o pega magnet: / infoHash..."
-                        style="width:100%; padding:16px 50px 16px 20px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); border-radius:16px; color:#fff; font-size:16px; outline:none; box-shadow:0 8px 32px rgba(0,0,0,0.4); backdrop-filter:blur(20px);"
-                        onkeydown="if(event.key==='Enter') executeSoberanoSearch()">
-                    <button onclick="executeSoberanoSearch()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg, #d946ef, #8b5cf6); border:none; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+                    <input type="text" id="soberanoSearchInput" class="soberano-search-field" tabindex="0"
+                        placeholder="Busca película, serie, anime o pega magnet: / infoHash..."
+                        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                        oninput="onSoberanoSearchInputChange(this.value)"
+                        onkeydown="if(event.key==='Enter'||event.keyCode===13){event.preventDefault();executeSoberanoSearch();}">
+                    <button id="btnSoberanoSearchClear" onclick="clearSoberanoSearch()" title="Borrar búsqueda"
+                        style="position:absolute; right:56px; top:50%; transform:translateY(-50%); width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,0.14); border:none; color:#ddd; cursor:pointer; display:none; align-items:center; justify-content:center; font-size:12px;">
+                        <i class="fa fa-times"></i>
+                    </button>
+                    <button id="btnExecuteSoberanoSearch" onclick="executeSoberanoSearch()" title="Buscar en enjambre"
+                        style="position:absolute; right:8px; top:50%; transform:translateY(-50%); width:42px; height:42px; border-radius:12px; background:linear-gradient(135deg, #d946ef, #8b5cf6); border:none; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; box-shadow:0 4px 14px rgba(217,70,239,0.4);">
                         <i class="fa fa-search"></i>
                     </button>
                 </div>
 
-                <!-- Chips de Búsqueda Rápida de Tendencias -->
-                <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:16px;">
-                    <button class="genre-chip" id="chipSoberanoSpanish" onclick="toggleSoberanoSpanishFilter()" style="background:rgba(255,159,10,0.2); border-color:rgba(255,159,10,0.5); color:#ffd60a; font-weight:700;">🇪🇸 Solo en Español</button>
-                    <button class="genre-chip" onclick="quickSoberanoSearch('Dune')">🎬 Dune</button>
-                    <button class="genre-chip" onclick="quickSoberanoSearch('Interstellar')">🚀 Interstellar</button>
-                    <button class="genre-chip" onclick="quickSoberanoSearch('Severance')">📺 Severance</button>
-                    <button class="genre-chip" onclick="quickSoberanoSearch('Breaking Bad')">⚗️ Breaking Bad</button>
-                    <button class="genre-chip" onclick="quickSoberanoSearch('Solo Leveling')">⛩️ Solo Leveling</button>
-                    <button class="genre-chip" onclick="quickSoberanoSearch('Mushoku Tensei')">🪄 Mushoku Tensei</button>
+                <!-- Filtro Útil: Solo en Español (Sin palabras de relleno) -->
+                <div style="display:flex; justify-content:center; margin-top:14px;">
+                    <button class="genre-chip" id="chipSoberanoSpanish" onclick="toggleSoberanoSpanishFilter()" style="background:rgba(255,159,10,0.2); border-color:rgba(255,159,10,0.5); color:#ffd60a; font-weight:700;">
+                        🇪🇸 Solo en Español
+                    </button>
                 </div>
             </section>
 
@@ -13558,7 +13585,7 @@
         // High-Performance Euclidean Nearest-Neighbor for Smart TVs
         // ========================================================
         const SpatialNav = {
-            focusableSelector: '.nav-item, .tv-card, .tv-poster-card, .catalog-card, .ep-row-card, .btn-apple-primary, .btn-apple-secondary, .btn-ctrl, .season-tab, .filter-pill, .type-pill, .genre-chip, .btn-page-nav, .sheet-close-btn, .search-close-x, button, [tabindex="0"]',
+            focusableSelector: '.nav-item, .tv-card, .tv-poster-card, .catalog-card, .ep-row-card, .btn-apple-primary, .btn-apple-secondary, .btn-ctrl, .season-tab, .filter-pill, .type-pill, .genre-chip, .btn-page-nav, .sheet-close-btn, .search-close-x, button, input, textarea, [tabindex="0"]',
 
             getActiveContext() {
                 const playerModal = document.getElementById('playerModal');
@@ -13760,6 +13787,51 @@
             }
 
             document.addEventListener('keydown', (e) => {
+                const activeTag = (document.activeElement && document.activeElement.tagName) ? document.activeElement.tagName.toUpperCase() : '';
+                const isInputActive = (activeTag === 'INPUT' || activeTag === 'TEXTAREA');
+
+                // Si el usuario está interactuando con un campo de texto (Buscador Soberano o Búsqueda Universal)
+                if (isInputActive) {
+                    // Botón Back de LG webOS (461 / GoBack / Escape): desenfocar campo y cerrar teclado virtual
+                    if (e.key === 'Escape' || e.key === 'GoBack' || e.keyCode === 461) {
+                        e.preventDefault();
+                        document.activeElement.blur();
+                        return;
+                    }
+                    // Enter / OK: Ejecutar búsqueda o confirmar
+                    if (e.keyCode === 13 || e.key === 'Enter') {
+                        e.preventDefault();
+                        if (document.activeElement.id === 'soberanoSearchInput') {
+                            const val = document.activeElement.value ? document.activeElement.value.trim() : '';
+                            if (val.length > 0) {
+                                document.activeElement.blur();
+                                executeSoberanoSearch();
+                            } else {
+                                document.activeElement.focus();
+                            }
+                        } else if (document.activeElement.id === 'universalSearchInput') {
+                            document.activeElement.blur();
+                        }
+                        return;
+                    }
+                    // Flecha arriba: desenfocar e ir hacia el navbar/cabecera
+                    if (e.keyCode === 38) {
+                        e.preventDefault();
+                        document.activeElement.blur();
+                        SpatialNav.navigate('up');
+                        return;
+                    }
+                    // Flecha abajo: desenfocar e ir hacia los filtros o resultados
+                    if (e.keyCode === 40) {
+                        e.preventDefault();
+                        document.activeElement.blur();
+                        SpatialNav.navigate('down');
+                        return;
+                    }
+                    // IMPORTANTE: Permitir paso libre total a todas las letras, números, símbolos, espacios, backspace y flechas izq/der
+                    return;
+                }
+
                 const isPlayer = document.getElementById('playerModal').classList.contains('active');
                 const isSheet = document.getElementById('sheetOverlay').classList.contains('active');
                 const isSearch = document.getElementById('searchModal').classList.contains('active');
@@ -15807,10 +15879,30 @@ function createSoberanoCard(item, mediaType = 'movie') {
     return card;
 }
 
+function onSoberanoSearchInputChange(val) {
+    const clearBtn = document.getElementById('btnSoberanoSearchClear');
+    if (clearBtn) {
+        clearBtn.style.display = (val && val.trim().length > 0) ? 'inline-flex' : 'none';
+    }
+}
+
+function clearSoberanoSearch() {
+    const input = document.getElementById('soberanoSearchInput');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('btnSoberanoSearchClear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    const secResults = document.getElementById('sectionSoberanoResults');
+    if (secResults) secResults.style.display = 'none';
+}
+
 function quickSoberanoSearch(term) {
     const input = document.getElementById('soberanoSearchInput');
     if (input) {
         input.value = term;
+        onSoberanoSearchInputChange(term);
         executeSoberanoSearch();
     }
 }
@@ -15867,6 +15959,12 @@ async function executeSoberanoSearch() {
         });
 
         secResults.scrollIntoView({ behavior: 'smooth' });
+        setTimeout(() => {
+            const firstCard = grid.querySelector('.catalog-card, .tv-card');
+            if (firstCard && typeof SpatialNav !== 'undefined') {
+                SpatialNav.focusElement(firstCard);
+            }
+        }, 300);
     } catch (err) {
         if (grid) grid.innerHTML = `<div style="color:var(--text-muted); padding:40px; grid-column:1/-1; text-align:center;">Error en búsqueda: ${err.message}</div>`;
     }

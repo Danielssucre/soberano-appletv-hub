@@ -262,7 +262,38 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 10. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 10. Limpieza Minimalista de Modo Soberano y Desbloqueo Total de la Barra de Búsqueda para LG TV
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`soberanoSearchInput`, `.soberano-search-field`, `btnSoberanoSearchClear`, `btnExecuteSoberanoSearch`, `onSoberanoSearchInputChange`, `clearSoberanoSearch`, `SpatialNav.focusableSelector`, `initKeyboardShortcuts`)
+* [`service/soberano_client.js`](service/soberano_client.js) (`onSoberanoSearchInputChange`, `clearSoberanoSearch`)
+
+### 🎯 ¿Para qué sirve?
+* **Eliminación de Relleno Visual:** Se erradicaron todas las sugerencias fijas de relleno en Modo Soberano (`Dune`, `Interstellar`, `Severance`, `Breaking Bad`, `Solo Leveling`, `Mushoku Tensei`), dejando una interfaz limpia, profesional y despejada bajo los principios de diseño de Apple TV Human Interface Guidelines (HIG).
+* **Conservación del Filtro Esencial:** Se mantuvo únicamente el chip funcional `[ 🇪🇸 Solo en Español ]` centrado bajo el buscador para filtrar torrents en idioma nativo.
+* **Desbloqueo Total de Escritura en Smart TV:** Corrige la falla donde el usuario no podía escribir nada en el buscador de Modo Soberano en la TV.
+  * Se integra soporte nativo tanto para teclado virtual de LG webOS (VKB), Magic Remote (puntero y D-Pad) como teclados físicos Bluetooth/USB.
+  * Se añade botón de borrado rápido `[ ✕ ]` que aparece automáticamente al escribir para vaciar la búsqueda en un toque.
+  * Al presionar Enter/OK en el teclado remoto, se lanza la búsqueda de inmediato y el foco de navegación salta al primer resultado encontrado.
+
+### ⚙️ ¿Cómo funciona?
+1. **Identificación de la Causa Raíz de Bloqueo:**
+   * El selector de navegación espacial (`SpatialNav.focusableSelector`) no incluía elementos `input` ni `textarea`, impidiendo que el motor de navegación D-Pad del televisor enfocara el campo de texto.
+   * El escuchador global de teclado (`document.addEventListener('keydown', ...)`) capturaba las teclas flecha izquierda (37), flecha derecha (39) y Enter (13) ejecutando `e.preventDefault()`, lo que robaba el foco del campo de texto de inmediato antes de que el teclado virtual de webOS pudiera emitir caracteres o mover el cursor.
+2. **Armadura de Bypass para Campos de Entrada Activos (`isInputActive`):**
+   * Al recibir cualquier pulsación de teclado, el sistema evalúa si el foco activo es un `<input>` o `<textarea>`.
+   * Si es un campo activo:
+     * **Letras, números, espacios, caracteres y flechas Izquierda/Derecha:** Se concede paso libre inmediato (`return`) sin ejecutar `e.preventDefault()`, permitiendo que el teclado virtual de LG y los teclados físicos escriban y muevan el cursor fluidamente.
+     * **Enter / OK (13):** Ejecuta la búsqueda (`executeSoberanoSearch()`) y desenfoca el campo para mostrar los resultados en pantalla.
+     * **Flecha Abajo (40):** Desenfoca el campo y transfiere suavemente el foco hacia el filtro de español o los resultados.
+     * **Flecha Arriba (38):** Desenfoca el campo y transfiere el foco hacia la barra de navegación superior.
+     * **Botón Atrás / Back (461 / Escape):** Desenfoca el campo y cierra el teclado virtual sin cerrar la aplicación.
+3. **Estilos de Enfoque de Alto Contraste Apple TV:**
+   * La clase `.soberano-search-field` cuenta con anillo de enfoque púrpura fluorescente (`rgba(232, 121, 249, 0.5)`), fondo translúcido y supresión de `transform: scale` para garantizar que el texto no se distorsione durante la escritura.
+
+---
+
+## 11. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash
