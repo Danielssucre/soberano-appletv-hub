@@ -199,7 +199,32 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 8. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 8. Autoreproducción del Siguiente Capítulo con Tarjeta Interactiva Apple TV / Netflix
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`btnAutoPlayNext`, `nextEpCard`, `toggleAutoPlayNext`, `startNextEpisodeCountdown`, `autoPlayNextTorrentEpisode`, `openSoberanoSwarmModal`)
+
+### 🎯 ¿Para qué sirve?
+* Permite ver series de corrido (Anime, Series Web TMDB y Torrents en RAM) sin tener que levantarse o buscar el mando al terminar cada episodio.
+* Añade un botón configurable en la barra del reproductor (**`Auto Sig: ON / OFF`**) persistente en `localStorage`.
+* Muestra una tarjeta interactiva estilo Apple TV / Netflix en los últimos segundos con una cuenta regresiva de 5 segundos, barra de progreso animada y botones de **`[ ▶ Reproducir ya (5s) ]`** y **`[ ✕ Cancelar ]`**.
+* Al cancelar o pulsar la tecla Volver/Back del control remoto, la tarjeta se descarta sin cerrar el reproductor ni interrumpir la sesión.
+
+### ⚙️ ¿Cómo funciona?
+1. **Detección Dinámica de Series (`isCurrentPlaybackSeries`):**
+   * El botón `Auto Sig: ON` y los botones de cambio de episodio solo se muestran cuando se está reproduciendo una serie (Anime del Vault, Serie TMDB o Serie Torrent), ocultándose automáticamente en películas individuales.
+2. **Tarjeta de Cuenta Regresiva (`#nextEpCard`):**
+   * Al finalizar el video (`video.onended`), si la autoreproducción está activa (`autoPlayNextEnabled = true`), aparece la tarjeta flotante en la esquina inferior derecha con desenfoque de cristal (`backdrop-filter: blur(28px)`).
+   * La barra de progreso se llena suavemente de 0% a 100% en 5 segundos.
+   * El foco del control remoto se coloca automáticamente en `Reproducir ya`, por lo que pulsar la tecla OK/Enter del Magic Remote avanza inmediatamente al siguiente episodio sin esperar los 5 segundos.
+3. **Soporte Universal de Transición:**
+   * **Anime (Vault / JKanime):** Localiza el siguiente capítulo y arranca la reproducción con `launchEpisodePlayback`.
+   * **Series Web TMDB:** Resuelve y carga el nuevo capítulo mediante `launchTmdbPlayback` (corrigiendo el orden de parámetros `season` y `episode`).
+   * **Torrents P2P en RAM (`autoPlayNextTorrentEpisode`):** Consulta el enjambre de torrents para `T{season} E{episode}`, selecciona automáticamente la mejor fuente (1080p con mayores seeds) y la envía directo a la memoria RAM de la Mac M3 sin abrir modales ni interrumpir al usuario. Si no encuentra semillas automáticas, abre el selector directamente en el nuevo capítulo.
+
+---
+
+## 9. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash

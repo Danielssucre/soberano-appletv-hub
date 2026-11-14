@@ -1233,6 +1233,106 @@
             border-radius: 20px;
         }
 
+        .btn-ctrl.btn-autoplay-active {
+            border-color: rgba(48, 209, 88, 0.6) !important;
+            background: rgba(48, 209, 88, 0.2) !important;
+            color: #30d158 !important;
+        }
+
+        /* Next Episode AutoPlay Countdown Card (Apple TV / Netflix) */
+        .next-ep-card {
+            position: absolute;
+            bottom: 125px;
+            right: 48px;
+            z-index: 95;
+            background: rgba(16, 16, 22, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            border-radius: 20px;
+            padding: 18px 22px;
+            width: 320px;
+            max-width: 90vw;
+            color: #ffffff;
+            animation: nextEpCardFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes nextEpCardFadeIn {
+            from { opacity: 0; transform: translateY(18px) scale(0.96); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .next-ep-header-tag {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #30d158;
+            font-weight: 700;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .next-ep-series-name {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .next-ep-target-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #ffffff;
+            margin: 3px 0 12px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .next-ep-progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.16);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 14px;
+        }
+        .next-ep-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #30d158, #38bdf8);
+            transition: width 0.1s linear;
+        }
+        .next-ep-card-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-next-now {
+            background: #ffffff !important;
+            color: #000000 !important;
+            font-weight: 700 !important;
+            font-size: 12.5px !important;
+            padding: 8px 14px !important;
+            border-radius: 12px !important;
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-next-cancel {
+            background: rgba(255, 255, 255, 0.12) !important;
+            color: #ffffff !important;
+            font-size: 12.5px !important;
+            padding: 8px 12px !important;
+            border-radius: 12px !important;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            cursor: pointer;
+        }
+
         .time-display {
             font-size: 13px;
             color: var(--text-secondary);
@@ -4035,6 +4135,26 @@
             <div id="soberanoHardsubMask" class="soberano-hardsub-mask"></div>
             <div id="soberanoSubOverlay" class="soberano-sub-overlay"></div>
 
+            <!-- Countdown Card: Auto-reproducir siguiente episodio (Apple TV / Netflix) -->
+            <div class="next-ep-card" id="nextEpCard" style="display:none;">
+                <div class="next-ep-header-tag">
+                    <i class="fa fa-forward-fast" style="color:#30d158;"></i> Siguiente Episodio
+                </div>
+                <div class="next-ep-series-name" id="nextEpCardSeries">Nombre de la Serie</div>
+                <div class="next-ep-target-title" id="nextEpCardTitle">Episodio 2</div>
+                <div class="next-ep-progress-bar">
+                    <div class="next-ep-progress-fill" id="nextEpProgressFill"></div>
+                </div>
+                <div class="next-ep-card-actions">
+                    <button class="btn-next-now btn-ctrl" id="btnNextNow" onclick="triggerNextEpisodeNow()">
+                        <i class="fa fa-play"></i> Reproducir ya (<span id="nextEpSecDisplay">5</span>s)
+                    </button>
+                    <button class="btn-next-cancel btn-ctrl" id="btnNextCancel" onclick="cancelNextEpisodeCountdown()">
+                        <i class="fa fa-times"></i> Cancelar
+                    </button>
+                </div>
+            </div>
+
             <!-- OSD Overlays -->
             <div class="player-osd" id="playerOSD">
                 <!-- Top Header -->
@@ -4085,17 +4205,22 @@
 
                         <div class="right-controls">
                             <!-- Episodio Anterior -->
-                            <button class="btn-ctrl" id="btnPrevEp" onclick="playAdjacentEpisode(-1)" title="Episodio Anterior">
+                            <button class="btn-ctrl series-only-ctrl" id="btnPrevEp" onclick="playAdjacentEpisode(-1)" title="Episodio Anterior">
                                 <i class="fa fa-backward-step"></i> <span class="btn-text">Ant</span>
                             </button>
 
                             <!-- Siguiente Episodio -->
-                            <button class="btn-ctrl" id="btnNextEp" onclick="playAdjacentEpisode(1)" title="Siguiente Episodio">
+                            <button class="btn-ctrl series-only-ctrl" id="btnNextEp" onclick="playAdjacentEpisode(1)" title="Siguiente Episodio">
                                 <i class="fa fa-forward-step"></i> <span class="btn-text">Sig</span>
                             </button>
 
+                            <!-- Auto-reproducir Siguiente Episodio (Toggle ON/OFF) -->
+                            <button class="btn-ctrl series-only-ctrl" id="btnAutoPlayNext" onclick="toggleAutoPlayNext()" title="Auto-reproducir siguiente episodio al terminar">
+                                <i class="fa fa-forward-fast" id="autoPlayIcon"></i> <span class="btn-text" id="autoPlayText">Auto Sig: ON</span>
+                            </button>
+
                             <!-- Lista de Episodios -->
-                            <button class="btn-ctrl" id="btnListEps" onclick="openEpisodesFromPlayer()" title="Lista de Episodios">
+                            <button class="btn-ctrl series-only-ctrl" id="btnListEps" onclick="openEpisodesFromPlayer()" title="Lista de Episodios">
                                 <i class="fa fa-list"></i> <span class="btn-text">Episodios</span>
                             </button>
 
@@ -10619,13 +10744,16 @@
             initAirPlay();
             initMobilePlayerTouchGestures();
 
-            // Auto-play siguiente episodio al terminar video (estilo Apple TV / Netflix)
+            updateAutoPlayButtonUI();
+
+            // Auto-play siguiente episodio al terminar video (estilo Apple TV / Netflix con cuenta regresiva interactiva)
             if (video) {
                 video.addEventListener('ended', () => {
-                    showToast('Reproduciendo siguiente episodio en 3 segundos...');
-                    setTimeout(() => {
-                        playAdjacentEpisode(1);
-                    }, 2500);
+                    if (autoPlayNextEnabled && isCurrentPlaybackSeries()) {
+                        startNextEpisodeCountdown();
+                    } else if (isCurrentPlaybackSeries()) {
+                        showToast('Episodio completado. Usa Sig para avanzar.');
+                    }
                 });
             }
         });
@@ -12088,6 +12216,7 @@
             availableSpanishSubs = [];
             currentSpanishSubIndex = 0;
             updateSubButtonsUI('off');
+            updatePlayerSeriesControlsVisibility();
 
             const modal = document.getElementById('playerModal');
             document.getElementById('playerSeriesTitle').textContent = anime.title;
@@ -12543,8 +12672,163 @@
             }
         }
 
+        // ========================================================
+        // AUTORREPRODUCCIÓN INTELIGENTE DE EPISODIOS (APPLE TV HIG)
+        // ========================================================
+        let autoPlayNextEnabled = localStorage.getItem('soberano_autoplay_next') !== 'false';
+        let nextEpCountdownTimer = null;
+        let nextEpCountdownSeconds = 5;
+
+        function toggleAutoPlayNext() {
+            autoPlayNextEnabled = !autoPlayNextEnabled;
+            localStorage.setItem('soberano_autoplay_next', autoPlayNextEnabled ? 'true' : 'false');
+            updateAutoPlayButtonUI();
+            showToast(autoPlayNextEnabled ? '⚡ Auto-reproducir siguiente episodio: ACTIVADO' : '⏸️ Auto-reproducir siguiente episodio: DESACTIVADO');
+        }
+
+        function updateAutoPlayButtonUI() {
+            const btn = document.getElementById('btnAutoPlayNext');
+            const txt = document.getElementById('autoPlayText');
+            const icon = document.getElementById('autoPlayIcon');
+            if (!btn || !txt) return;
+            if (autoPlayNextEnabled) {
+                btn.classList.add('btn-autoplay-active');
+                txt.textContent = 'Auto Sig: ON';
+                if (icon) icon.style.color = '#30d158';
+            } else {
+                btn.classList.remove('btn-autoplay-active');
+                txt.textContent = 'Auto Sig: OFF';
+                if (icon) icon.style.color = '#888888';
+            }
+        }
+
+        function isCurrentPlaybackSeries() {
+            if (activeAnime) return true;
+            if (currentTmdbPlaying) {
+                if (currentTmdbPlaying.season) return true;
+                const item = currentTmdbPlaying.item;
+                if (item && (item.media_type === 'tv' || item.type === 'tv' || item.first_air_date)) return true;
+            }
+            return false;
+        }
+
+        function updatePlayerSeriesControlsVisibility() {
+            const isSeries = isCurrentPlaybackSeries();
+            document.querySelectorAll('.series-only-ctrl').forEach(el => {
+                el.style.display = isSeries ? 'inline-flex' : 'none';
+            });
+            updateAutoPlayButtonUI();
+        }
+
+        function getNextEpisodeInfo() {
+            if (activeAnime && activeEpisode) {
+                const targetEpNum = (activeEpisode.episode || 1) + 1;
+                const seriesTitle = activeAnime.title || activeAnime.name || 'Anime';
+                return { seriesTitle, nextEpNum: targetEpNum, epTitle: `Episodio ${targetEpNum}` };
+            }
+            if (currentTmdbPlaying && currentTmdbPlaying.item) {
+                const cItem = currentTmdbPlaying.item;
+                const isTv = currentTmdbPlaying.season || cItem.media_type === 'tv' || cItem.first_air_date;
+                if (isTv) {
+                    const curSeason = currentTmdbPlaying.season || 1;
+                    const nextEpNum = (currentTmdbPlaying.episode || 1) + 1;
+                    const seriesTitle = cItem.name || cItem.title || 'Serie';
+                    return { seriesTitle, nextEpNum, epTitle: `T${curSeason} • Episodio ${nextEpNum}` };
+                }
+            }
+            return null;
+        }
+
+        function startNextEpisodeCountdown() {
+            cancelNextEpisodeCountdown();
+            if (!autoPlayNextEnabled || !isCurrentPlaybackSeries()) return;
+
+            const nextInfo = getNextEpisodeInfo();
+            if (!nextInfo) return;
+
+            const card = document.getElementById('nextEpCard');
+            const seriesEl = document.getElementById('nextEpCardSeries');
+            const titleEl = document.getElementById('nextEpCardTitle');
+            const secDisp = document.getElementById('nextEpSecDisplay');
+            const fill = document.getElementById('nextEpProgressFill');
+
+            if (!card) return;
+
+            if (seriesEl) seriesEl.textContent = nextInfo.seriesTitle || 'Serie';
+            if (titleEl) titleEl.textContent = nextInfo.epTitle || `Episodio ${nextInfo.nextEpNum}`;
+            if (secDisp) secDisp.textContent = '5';
+            if (fill) fill.style.width = '0%';
+
+            card.style.display = 'block';
+
+            const btnNow = document.getElementById('btnNextNow');
+            if (btnNow && typeof SpatialNav !== 'undefined') {
+                SpatialNav.focusElement(btnNow);
+            }
+
+            const startTime = Date.now();
+            const totalDuration = 5000;
+
+            nextEpCountdownTimer = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const remaining = Math.max(0, totalDuration - elapsed);
+                const remSec = Math.ceil(remaining / 1000);
+
+                if (secDisp) secDisp.textContent = remSec;
+                if (fill) fill.style.width = `${((totalDuration - remaining) / totalDuration) * 100}%`;
+
+                if (remaining <= 0) {
+                    cancelNextEpisodeCountdown();
+                    triggerNextEpisodeNow();
+                }
+            }, 100);
+        }
+
+        function cancelNextEpisodeCountdown() {
+            if (nextEpCountdownTimer) {
+                clearInterval(nextEpCountdownTimer);
+                nextEpCountdownTimer = null;
+            }
+            const card = document.getElementById('nextEpCard');
+            if (card) card.style.display = 'none';
+        }
+
+        function triggerNextEpisodeNow() {
+            cancelNextEpisodeCountdown();
+            playAdjacentEpisode(1);
+        }
+
+        async function autoPlayNextTorrentEpisode(item, season, episode) {
+            showToast(`⚡ Conectando al enjambre para T${season} • Episodio ${episode}...`);
+            try {
+                const id = item.id || item.tmdb_id;
+                const resp = await fetch(`${PROXY_BASE}/api/soberano/streams?id=${encodeURIComponent(id)}&type=tv&s=${season}&e=${episode}`);
+                const data = await resp.json();
+                const streams = (data && Array.isArray(data.streams)) ? data.streams : [];
+                if (streams.length > 0) {
+                    activeSoberanoItem = { ...item, mediaType: 'tv' };
+                    activeSoberanoStreams = streams;
+                    currentSoberanoSeason = season;
+                    currentSoberanoEpisode = episode;
+                    let bestIdx = 0;
+                    const match1080 = streams.findIndex(s => (s.quality || '').includes('1080') && (s.seeds || 0) > 2);
+                    if (match1080 !== -1) bestIdx = match1080;
+
+                    showToast(`🍿 Auto-reproduciendo T${season} • Episodio ${episode} (${streams[bestIdx].quality} • ${streams[bestIdx].seeds} seeds)`);
+                    playSoberanoTorrent(bestIdx);
+                } else {
+                    showToast(`⚠️ No se encontraron torrents automáticos para T${season} • E${episode}. Abriendo selector...`);
+                    openSoberanoSwarmModal(item, 'tv', season, episode);
+                }
+            } catch (err) {
+                console.warn('Error en auto-play de torrent:', err);
+                openSoberanoSwarmModal(item, 'tv', season, episode);
+            }
+        }
+
         // Navegación de Episodios Estilo Apple TV (Siguiente / Anterior)
         function playAdjacentEpisode(offset) {
+            cancelNextEpisodeCountdown();
             if (!activeAnime && currentTmdbPlaying && currentTmdbPlaying.item) {
                 const cItem = currentTmdbPlaying.item;
                 const isTv = currentTmdbPlaying.season || cItem.media_type === 'tv' || cItem.first_air_date;
@@ -12557,10 +12841,14 @@
                             currentSoberanoSeason = curSeason;
                             currentSoberanoEpisode = nextEpNum;
                             showToast(`${offset > 0 ? 'Siguiente' : 'Anterior'}: T${curSeason} • Episodio ${nextEpNum}`);
-                            openSoberanoSwarmModal(cItem, 'tv', curSeason, nextEpNum);
+                            if (offset > 0) {
+                                autoPlayNextTorrentEpisode(cItem, curSeason, nextEpNum);
+                            } else {
+                                openSoberanoSwarmModal(cItem, 'tv', curSeason, nextEpNum);
+                            }
                         } else if (typeof launchTmdbPlayback === 'function') {
                             showToast(`${offset > 0 ? 'Siguiente' : 'Anterior'}: T${curSeason} • Episodio ${nextEpNum}`);
-                            launchTmdbPlayback(cItem, 'tv', 'native', curSeason, nextEpNum);
+                            launchTmdbPlayback(cItem, curSeason, nextEpNum, 'direct_native');
                         }
                     } else {
                         showToast('Ya estás en el primer episodio');
@@ -12612,6 +12900,7 @@
         }
 
         function closePlayer() {
+            cancelNextEpisodeCountdown();
             stopAlignmentPolling();
             clearTimeout(playbackWatchdog);
             video.pause();
@@ -13327,6 +13616,11 @@
             // webOS Platform Back Handler nativo
             if (window.webOS && window.webOS.platformBack) {
                 window.webOS.platformBack = function() {
+                    const nextCard = document.getElementById('nextEpCard');
+                    if (nextCard && nextCard.style.display !== 'none') {
+                        cancelNextEpisodeCountdown();
+                        return true;
+                    }
                     const isPlayer = document.getElementById('playerModal').classList.contains('active');
                     const isSheet = document.getElementById('sheetOverlay').classList.contains('active');
                     const isSearch = document.getElementById('searchModal').classList.contains('active');
@@ -13352,6 +13646,11 @@
                 // Botón Back de LG webOS (461 / GoBack / Escape)
                 if (e.key === 'Escape' || e.key === 'GoBack' || e.keyCode === 461) {
                     e.preventDefault();
+                    const nextCard = document.getElementById('nextEpCard');
+                    if (nextCard && nextCard.style.display !== 'none') {
+                        cancelNextEpisodeCountdown();
+                        return;
+                    }
                     if (isPlayer) {
                         closePlayer();
                         setTimeout(() => {
@@ -14386,6 +14685,7 @@
             subtitlesEnabled = false;
             currentSubCues = [];
             updateSubButtonsUI('off');
+            updatePlayerSeriesControlsVisibility();
             const type = item.media_type || (season ? 'tv' : (item.title ? 'movie' : 'tv'));
             const s = season || 1;
             const e = episode || 1;
@@ -15435,9 +15735,11 @@ let currentSoberanoSeason = 1;
 let currentSoberanoEpisode = 1;
 let soberanoCachedVideos = [];
 
-async function openSoberanoSwarmModal(item, mediaType = 'movie') {
+async function openSoberanoSwarmModal(item, mediaType = 'movie', targetSeason = 1, targetEpisode = 1) {
     const isTv = mediaType === 'tv' || mediaType === 'series' || item.type === 'tv' || item.media_type === 'tv' || item.mediaType === 'tv' || !!item.season;
     activeSoberanoItem = { ...item, mediaType: isTv ? 'tv' : 'movie' };
+    currentSoberanoSeason = parseInt(targetSeason || 1, 10) || 1;
+    currentSoberanoEpisode = parseInt(targetEpisode || 1, 10) || 1;
     const modal = document.getElementById('soberanoSwarmModal');
     const titleEl = document.getElementById('soberanoSwarmTitle');
     const bannerEl = document.getElementById('soberanoSwarmBanner');
@@ -15460,7 +15762,7 @@ async function openSoberanoSwarmModal(item, mediaType = 'movie') {
     // Configuración del selector de Episodios si es Serie o Anime
     if (isTv && epBar) {
         epBar.style.display = 'block';
-        initSoberanoSeasonEpisodeSelectors(item);
+        initSoberanoSeasonEpisodeSelectors(item, currentSoberanoSeason, currentSoberanoEpisode);
     } else if (epBar) {
         epBar.style.display = 'none';
         currentSoberanoSeason = 1;
@@ -15475,15 +15777,15 @@ function closeSoberanoSwarmModal(e) {
     if (modal) modal.classList.remove('active');
 }
 
-async function initSoberanoSeasonEpisodeSelectors(item) {
+async function initSoberanoSeasonEpisodeSelectors(item, targetSeason = 1, targetEpisode = 1) {
     const sTabs = document.getElementById('soberanoSeasonTabs');
     const eTabs = document.getElementById('soberanoEpisodeTabs');
     if (!sTabs || !eTabs) return;
 
     sTabs.innerHTML = '<span style="font-size:12px; color:var(--text-muted);"><i class="fa fa-spinner fa-spin"></i> Cargando temporadas...</span>';
     eTabs.innerHTML = '';
-    currentSoberanoSeason = 1;
-    currentSoberanoEpisode = 1;
+    currentSoberanoSeason = parseInt(targetSeason || 1, 10) || 1;
+    currentSoberanoEpisode = parseInt(targetEpisode || 1, 10) || 1;
 
     let seasonsList = [];
     soberanoCachedVideos = [];
@@ -15518,6 +15820,10 @@ async function initSoberanoSeasonEpisodeSelectors(item) {
     // 3. Fallback en caso de fallo de red
     if (seasonsList.length === 0) {
         seasonsList = [1, 2, 3, 4, 5];
+        if (currentSoberanoSeason > 5) seasonsList.push(currentSoberanoSeason);
+    } else if (!seasonsList.includes(currentSoberanoSeason)) {
+        seasonsList.push(currentSoberanoSeason);
+        seasonsList.sort((a, b) => a - b);
     }
 
     // Renderizar Solapas de Temporadas (Apple HIG Season Tabs)
@@ -15679,6 +15985,7 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     currentCustomSub = null;
     currentSubCues = [];
     updateSubButtonsUI(isBurned ? "on" : "off");
+    updatePlayerSeriesControlsVisibility();
     const type = item.media_type || (season ? "tv" : "movie");
     const s = season || 1;
     const e = episode || 1;
