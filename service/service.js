@@ -3160,8 +3160,24 @@ const server = http.createServer(async (req, res) => {
 
     // 7. TMDB Transparent Proxy (Movies & TV Series Tabs)
     if (parsed.pathname.startsWith('/api/tmdb/')) {
-        const subpath = parsed.pathname.replace(/^\/api\/tmdb\//, '');
+        let subpath = parsed.pathname.replace(/^\/api\/tmdb\//, '');
         const queryStr = parsed.search ? parsed.search.replace(/^\?/, '') : '';
+
+        // Auto-resolver IMDb IDs (tt1234567) en rutas como tv/tt1234567 o movie/tt1234567
+        const imdbMatch = subpath.match(/(tv|movie)\/(tt\d+)(\/.*)?/);
+        if (imdbMatch) {
+            const mType = imdbMatch[1];
+            const imdbId = imdbMatch[2];
+            const rest = imdbMatch[3] || '';
+            try {
+                const findRes = await proxyTmdbRequest(`find/${imdbId}`, 'external_source=imdb_id');
+                const findData = JSON.parse(findRes.body || '{}');
+                const hit = (findData.tv_results && findData.tv_results[0]) || (findData.movie_results && findData.movie_results[0]);
+                if (hit && hit.id) {
+                    subpath = `${mType}/${hit.id}${rest}`;
+                }
+            } catch(eFind) {}
+        }
 
         try {
             const tmdbRes = await proxyTmdbRequest(subpath, queryStr);

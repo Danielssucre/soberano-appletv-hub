@@ -1396,7 +1396,7 @@
             width: 100vw;
             height: 100vh;
             background: rgba(4, 7, 12, 0.88);
-            z-index: 4000;
+            z-index: 7000;
             display: none;
             align-items: center;
             justify-content: center;
@@ -2108,7 +2108,7 @@
         }
 
         .sheet-overlay.above-player {
-            z-index: 6000 !important;
+            z-index: 7500 !important;
         }
 
         /* Catalog Grid: 30 cards */
@@ -11568,6 +11568,8 @@
         // I. MODAL SHEET: DETALLES Y EPISODIOS (APPLE TV HIG)
         // ==========================================
         function openDetailsSheet(anime) {
+            const sModal = document.getElementById('searchModal');
+            if (sModal) sModal.classList.remove('active');
             FocusManager.push(document.activeElement);
             activeAnime = anime;
             activeTmdbItem = null;
@@ -11810,8 +11812,16 @@
         function closeSheet(e) {
             if (e && e.target !== document.getElementById('sheetOverlay') && !e.target.closest('.sheet-close-btn')) return;
             const overlay = document.getElementById('sheetOverlay');
+            const wasAbovePlayer = overlay.classList.contains('above-player');
             overlay.classList.remove('active');
             overlay.classList.remove('above-player');
+            if (wasAbovePlayer) {
+                const btn = document.getElementById('btnListEps') || document.getElementById('btnPlayPause');
+                if (btn && typeof SpatialNav !== 'undefined') {
+                    SpatialNav.focusElement(btn, true);
+                    return;
+                }
+            }
             FocusManager.popAndRestore();
         }
 
@@ -11825,6 +11835,31 @@
         let subtitlesEnabled = false;
         let isSearchingAutoSub = false;
         let currentSubBlobUrl = null;
+
+        function resetMediaHardware() {
+            clearTimeout(playbackWatchdog);
+            if (hlsPlayer) {
+                try { hlsPlayer.destroy(); } catch (e) {}
+                hlsPlayer = null;
+            }
+            if (video) {
+                try { video.pause(); } catch (e) {}
+                if (video._currentOnLoadedMeta) {
+                    try { video.removeEventListener('loadedmetadata', video._currentOnLoadedMeta); } catch (e) {}
+                    video._currentOnLoadedMeta = null;
+                }
+                video.onerror = null;
+                Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
+                try {
+                    video.removeAttribute('src');
+                    video.load();
+                } catch (e) {}
+            }
+            if (fallbackIframe) {
+                fallbackIframe.style.display = 'none';
+                fallbackIframe.src = 'about:blank';
+            }
+        }
 
         // Persistencia e Inferencia de Subtítulos (Apple TV / Netflix)
         // Si el usuario activa subtítulos en un capítulo, persisten automáticamente en los siguientes.
@@ -12357,6 +12392,7 @@
         }
 
         async function launchEpisodePlayback(anime, episode, resumeTime = 0) {
+            resetMediaHardware();
             nextEpAutoTriggered = false;
             nextEpCancelledForThisEpisode = false;
             cancelNextEpisodeCountdown();
@@ -12781,13 +12817,16 @@
             document.getElementById('playBtnText').textContent = 'Reproducir';
             handlePlayerUserActivity();
 
-            // SOBERANO EOF GUARD: Si el stream termina y el reproductor webOS se pausa al final sin disparar 'ended'
+            // SOBERANO EOF GUARD: Solo para streams VOD terminados que no sean en directo ni HLS live/event
             if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                const cur = video ? (video.currentTime || 0) : 0;
-                const dur = getEffectiveVideoDuration();
-                if (dur > 45 && cur > 30 && (dur - cur <= 4.0 || cur >= dur - 1.0)) {
-                    console.log(`[AUTOPLAY] Stream pausado al final (EOF sin ended: cur=${cur.toFixed(1)}, dur=${dur.toFixed(1)}). Avanzando automáticamente...`);
-                    triggerNextEpisodeNow();
+                const isLiveHls = typeof hlsPlayer !== 'undefined' && hlsPlayer && hlsPlayer.levels && hlsPlayer.levels[0] && hlsPlayer.levels[0].details && hlsPlayer.levels[0].details.live;
+                if (!isLiveHls) {
+                    const cur = video ? (video.currentTime || 0) : 0;
+                    const dur = getEffectiveVideoDuration();
+                    if (dur >= 600 && cur >= 500 && (dur - cur <= 3.0 || cur >= dur - 1.0)) {
+                        console.log(`[AUTOPLAY] Stream pausado al final (EOF sin ended: cur=${cur.toFixed(1)}, dur=${dur.toFixed(1)}). Avanzando automáticamente...`);
+                        triggerNextEpisodeNow();
+                    }
                 }
             }
         });
@@ -13183,7 +13222,9 @@
             const overlay = document.getElementById('sheetOverlay');
             if (overlay) overlay.classList.add('above-player');
             if (currentTmdbPlaying && currentTmdbPlaying.item) {
-                openTmdbDetailsSheet(currentTmdbPlaying.item, currentTmdbPlaying.item.media_type || 'tv');
+                const targetItem = { ...currentTmdbPlaying.item };
+                if (!targetItem.id && currentTmdbPlaying.item.tmdb_id) targetItem.id = currentTmdbPlaying.item.tmdb_id;
+                openTmdbDetailsSheet(targetItem, currentTmdbPlaying.item.media_type || 'tv');
             } else if (activeAnime) {
                 openDetailsSheet(activeAnime);
             }
@@ -13194,8 +13235,7 @@
             nextEpCancelledForThisEpisode = false;
             cancelNextEpisodeCountdown();
             stopAlignmentPolling();
-            clearTimeout(playbackWatchdog);
-            video.pause();
+            resetMediaHardware();
             currentSubCues = [];
             const subOverlay = document.getElementById('soberanoSubOverlay');
             if (subOverlay) {
@@ -13205,14 +13245,6 @@
             }
             const hardsubMask = document.getElementById('soberanoHardsubMask');
             if (hardsubMask) hardsubMask.classList.remove('active');
-            Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
-            video.removeAttribute('src');
-            video.load();
-            fallbackIframe.src = 'about:blank';
-            if (hlsPlayer) {
-                hlsPlayer.destroy();
-                hlsPlayer = null;
-            }
             clearInterval(statsInterval);
             document.getElementById('playerModal').classList.remove('active');
             FocusManager.popAndRestore();
@@ -13235,13 +13267,16 @@
 
                 // AutoPlay Heartbeat Guard: Si el video está en los últimos segundos o detenido al final
                 if (video && autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                    const cur = video.currentTime || 0;
-                    const dur = getEffectiveVideoDuration();
-                    if (dur > 45 && cur > 30) {
-                        const rem = dur - cur;
-                        if (rem <= 2.5 || (video.paused && rem <= 7.0)) {
-                            console.log(`[AUTOPLAY HEARTBEAT] Video finalizado o detenido al final (rem=${rem.toFixed(1)}s, paused=${video.paused}). Avanzando al siguiente episodio...`);
-                            triggerNextEpisodeNow();
+                    const isLiveHls = typeof hlsPlayer !== 'undefined' && hlsPlayer && hlsPlayer.levels && hlsPlayer.levels[0] && hlsPlayer.levels[0].details && hlsPlayer.levels[0].details.live;
+                    if (!isLiveHls) {
+                        const cur = video.currentTime || 0;
+                        const dur = getEffectiveVideoDuration();
+                        if (dur >= 600 && cur >= 500) {
+                            const rem = dur - cur;
+                            if (rem <= 2.0 && !video.paused) {
+                                console.log(`[AUTOPLAY HEARTBEAT] Video VOD finalizado (rem=${rem.toFixed(1)}s). Avanzando al siguiente episodio...`);
+                                triggerNextEpisodeNow();
+                            }
                         }
                     }
                 }
@@ -13288,9 +13323,10 @@
         }
 
         function closeSearchModal(e) {
-            if (e && e.target !== document.getElementById('searchModal') && !e.target.closest('.search-close-x')) return;
-            document.getElementById('searchModal').classList.remove('active');
-            FocusManager.popAndRestore('#tabSearch, #universalSearchInput');
+            if (e && e.target && e.target !== document.getElementById('searchModal') && !e.target.closest('.search-close-x')) return;
+            const modal = document.getElementById('searchModal');
+            if (modal) modal.classList.remove('active');
+            if (e) FocusManager.popAndRestore('#tabSearch, #universalSearchInput');
         }
 
         function renderInitialSearchResults() {
@@ -13358,7 +13394,8 @@
             card.className = 'tv-poster-card';
             card.setAttribute('tabindex', '0');
             card.onclick = () => {
-                closeSearchModal();
+                const sModal = document.getElementById('searchModal');
+                if (sModal) sModal.classList.remove('active');
                 if (item.isLocal || item.seasons) {
                     openDetailsSheet(item);
                 } else {
@@ -14688,8 +14725,17 @@
             const rating = item.vote_average ? `${item.vote_average.toFixed(1)} ★` : '';
             const safeTitle = title.replace(/'/g, '');
 
-            card.onclick = () => { closeSearchModal(); openTmdbDetailsSheet(item, type); };
-            card.onkeydown = (e) => { if (e.key === 'Enter') { closeSearchModal(); openTmdbDetailsSheet(item, type); } };
+            card.onclick = () => {
+                const sModal = document.getElementById('searchModal');
+                if (sModal) sModal.classList.remove('active');
+                openTmdbDetailsSheet(item, type);
+            };
+            card.onkeydown = (e) => {
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                    e.preventDefault();
+                    card.onclick();
+                }
+            };
 
             card.innerHTML = `
                 <div class="poster-wrap">
@@ -14707,9 +14753,30 @@
         }
 
         async function openTmdbDetailsSheet(item, mediaType = 'movie') {
+            const sModal = document.getElementById('searchModal');
+            if (sModal) sModal.classList.remove('active');
             FocusManager.push(document.activeElement);
             activeTmdbItem = { ...item, media_type: mediaType };
             activeAnime = null;
+
+            // Si el item viene con IMDb ID (ej: tt0807832), resolver id numérico de TMDB de inmediato
+            if (activeTmdbItem.id && String(activeTmdbItem.id).startsWith('tt')) {
+                try {
+                    const findResp = await fetch(`${PROXY_BASE}/api/tmdb/find/${activeTmdbItem.id}?external_source=imdb_id`);
+                    if (findResp.ok) {
+                        const findData = await findResp.json();
+                        const hit = (findData.tv_results && findData.tv_results[0]) || (findData.movie_results && findData.movie_results[0]);
+                        if (hit && hit.id) {
+                            activeTmdbItem.id = hit.id;
+                            activeTmdbItem.tmdb_id = hit.id;
+                            if (hit.title || hit.name) {
+                                activeTmdbItem.title = hit.title || hit.name;
+                                activeTmdbItem.name = hit.title || hit.name;
+                            }
+                        }
+                    }
+                } catch(e) {}
+            }
 
             // SOBERANO SPECULATIVE PRE-WARMING (Instant-Start < 200ms)
             // Pre-calienta en la RAM del Mac M3 el manifiesto, llaves y primer segmento mientras el usuario lee
@@ -14913,13 +14980,17 @@
 
                     // Si el usuario ya estaba viendo una temporada específica de esta serie, abrir esa temporada automáticamente
                     let initialSeasonNum = activeTmdbSeasons.length > 0 ? activeTmdbSeasons[0].season_number : 1;
-                    try {
-                        const savedHist = getPlaybackHistory() || [];
-                        const prevEntry = savedHist.find(h => h.isTmdb && String(h.tmdbId) === String(item.id) && h.season);
-                        if (prevEntry && activeTmdbSeasons.some(s => s.season_number === Number(prevEntry.season))) {
-                            initialSeasonNum = Number(prevEntry.season);
-                        }
-                    } catch(eH) {}
+                    if (currentTmdbPlaying && currentTmdbPlaying.season && activeTmdbSeasons.some(s => s.season_number === Number(currentTmdbPlaying.season))) {
+                        initialSeasonNum = Number(currentTmdbPlaying.season);
+                    } else {
+                        try {
+                            const savedHist = getPlaybackHistory() || [];
+                            const prevEntry = savedHist.find(h => h.isTmdb && String(h.tmdbId) === String(item.id) && h.season);
+                            if (prevEntry && activeTmdbSeasons.some(s => s.season_number === Number(prevEntry.season))) {
+                                initialSeasonNum = Number(prevEntry.season);
+                            }
+                        } catch(eH) {}
+                    }
 
                     // Poblar Solapas Horizontales (ÚNICO control de temporadas, 1 solo toque)
                     tabsRow.innerHTML = '';
@@ -15003,8 +15074,19 @@
                     };
                     card.onclick = () => {
                         closeSheet();
-                        const srv = document.getElementById('sheetServerSelect') ? document.getElementById('sheetServerSelect').value : 'direct_native';
-                        launchTmdbPlayback(activeTmdbItem, seasonNum, ep.episode_number, srv);
+                        const isCurrentShowTorrent = (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p') ||
+                                                    (activeTmdbItem && (activeTmdbItem.mediaType === 'torrent' || activeTmdbItem.isTorrent));
+                        if (isCurrentShowTorrent) {
+                            const swarmItem = {
+                                ...activeTmdbItem,
+                                id: (currentTmdbPlaying && currentTmdbPlaying.item && currentTmdbPlaying.item.id) || activeTmdbItem.id,
+                                tmdb_id: activeTmdbItem.tmdb_id || activeTmdbItem.id
+                            };
+                            autoPlayNextTorrentEpisode(swarmItem, seasonNum, ep.episode_number);
+                        } else {
+                            const srv = document.getElementById('sheetServerSelect') ? document.getElementById('sheetServerSelect').value : 'direct_native';
+                            launchTmdbPlayback(activeTmdbItem, seasonNum, ep.episode_number, srv);
+                        }
                     };
                     card.onkeydown = (e) => {
                         if (e.key === 'Enter' || e.keyCode === 13) {
@@ -15014,7 +15096,10 @@
                     };
                     const stillImg = ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : '';
                     let statusBadgeHtml = '';
-                    if (ep.air_date) {
+                    const isCurrentlyPlaying = (currentTmdbPlaying && Number(currentTmdbPlaying.season || 1) === Number(seasonNum) && Number(currentTmdbPlaying.episode || 1) === Number(ep.episode_number));
+                    if (isCurrentlyPlaying) {
+                        statusBadgeHtml = `<span style="background:rgba(56,189,248,0.25); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle;"><i class="fa fa-play" style="font-size:9px; margin-right:3px;"></i>REPRODUCIENDO</span>`;
+                    } else if (ep.air_date) {
                         const airMs = new Date(ep.air_date).getTime();
                         const diffDays = (nowMs - airMs) / 86400000;
                         if (diffDays >= -1 && diffDays <= 14) {
@@ -15159,14 +15244,9 @@
             clearTimeout(alignPollTimer);
 
             // PURGA DE SEGURIDAD ESTRICTA: Erradicar colas residuales de animes anteriores
-            clearTimeout(playbackWatchdog);
-            if (hlsPlayer) {
-                hlsPlayer.destroy();
-                hlsPlayer = null;
-            }
+            resetMediaHardware();
             directServersQueue = [];
             currentServerIndex = 0;
-            try { video.pause(); } catch(e) {}
 
             if (customSub) {
                 currentCustomSub = customSub;
@@ -15349,6 +15429,23 @@
             }
 
             // FALLBACK ALTERNATIVO EN CASO DE NO HABER FUENTE DIRECTA
+            if (type === 'tv' || season || episode) {
+                console.log(`[TMDB FALLBACK] Sin stream directo para T${s}•E${e}, consultando enjambre P2P...`);
+                const id = item.id || item.tmdb_id;
+                try {
+                    const resp = await fetch(`${PROXY_BASE}/api/soberano/streams?id=${encodeURIComponent(id)}&type=tv&s=${s}&e=${e}`);
+                    const data = await resp.json();
+                    const streams = (data && Array.isArray(data.streams)) ? data.streams : [];
+                    if (streams.length > 0) {
+                        showToast(`🍿 Encontrado en Enjambre Torrent (${streams[0].quality} • ${streams[0].seeds} seeds)`);
+                        autoPlayNextTorrentEpisode(item, s, e);
+                        return;
+                    }
+                } catch(eSob) {
+                    console.warn('[TMDB FALLBACK] Error en fallback torrent:', eSob);
+                }
+            }
+
             let targetTmdbId = item.tmdb_id || item.id;
             const embedBackup = buildEmbedUrl(targetTmdbId, type, season, episode, 'framex', currentCustomSub);
             currentFallbackUrl = embedBackup;
@@ -15544,15 +15641,21 @@
                 } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                     hlsPlayer = new Hls({
                         startPosition: startTime > 0 ? startTime : 0,
-                        maxBufferLength: 30,
-                        maxMaxBufferLength: 60,
-                        maxBufferSize: 16 * 1024 * 1024,
-                        maxBufferHole: 0.8,
-                        highBufferWatchdogPeriod: 3,
+                        maxBufferLength: 60,
+                        maxMaxBufferLength: 120,
+                        maxBufferSize: 32 * 1024 * 1024,
+                        maxBufferHole: 1.0,
+                        highBufferWatchdogPeriod: 2,
+                        liveSyncDurationCount: 3,
+                        liveMaxLatencyDurationCount: 30,
                         enableWorker: false,
                         progressive: true,
                         renderTextTracksNatively: false
                     });
+                    try {
+                        video.removeAttribute('src');
+                        video.load();
+                    } catch(e) {}
                     hlsPlayer.loadSource(tmdbDirectStreamUrl);
                     hlsPlayer.attachMedia(video);
                     hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -15582,25 +15685,33 @@
                         }
                     });
                     hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
-                        if (data.fatal) {
-                            const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
-                            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsPlayer && (hlsPlayer._netRetries || 0) < 3) {
-                                hlsPlayer._netRetries = (hlsPlayer._netRetries || 0) + 1;
-                                console.warn(`[TMDB PLAYER] HLS Network Error recuperable (${hlsPlayer._netRetries}/3) en [${cleanName}], reanudando carga...`, data.details);
-                                setTimeout(() => {
-                                    if (hlsPlayer) hlsPlayer.startLoad(resumePos > 0 ? resumePos : -1);
-                                }, 1200);
-                                return;
+                        if (!data.fatal) {
+                            if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+                                console.warn(`[TMDB PLAYER] HLS bufferStalledError en [${cleanName}], verificando carga de fragmentos...`);
+                                if (hlsPlayer && hlsPlayer.levelController && !hlsPlayer.levelController.canLoad) {
+                                    console.log('[TMDB PLAYER] Recuperando carga activa tras bufferStalledError');
+                                    hlsPlayer.startLoad();
+                                }
                             }
-                            if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsPlayer && !hlsPlayer._mediaRecovered) {
-                                hlsPlayer._mediaRecovered = true;
-                                console.warn(`[TMDB PLAYER] HLS Media Error recuperable en [${cleanName}], ejecutando recoverMediaError()...`, data.details);
-                                hlsPlayer.recoverMediaError();
-                                return;
-                            }
-                            console.warn(`[TMDB PLAYER] HLS Fatal en servidor [${cleanName}], pasando al siguiente en pos ${resumePos.toFixed(1)}s...`, data);
-                            executeTmdbDirectPlayback(serverIndex + 1, resumePos || 0);
+                            return;
                         }
+                        const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsPlayer && (hlsPlayer._netRetries || 0) < 3) {
+                            hlsPlayer._netRetries = (hlsPlayer._netRetries || 0) + 1;
+                            console.warn(`[TMDB PLAYER] HLS Network Error recuperable (${hlsPlayer._netRetries}/3) en [${cleanName}], reanudando carga...`, data.details);
+                            setTimeout(() => {
+                                if (hlsPlayer) hlsPlayer.startLoad(resumePos > 0 ? resumePos : -1);
+                            }, 1200);
+                            return;
+                        }
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsPlayer && !hlsPlayer._mediaRecovered) {
+                            hlsPlayer._mediaRecovered = true;
+                            console.warn(`[TMDB PLAYER] HLS Media Error recuperable en [${cleanName}], ejecutando recoverMediaError()...`, data.details);
+                            hlsPlayer.recoverMediaError();
+                            return;
+                        }
+                        console.warn(`[TMDB PLAYER] HLS Fatal en servidor [${cleanName}], pasando al siguiente en pos ${resumePos.toFixed(1)}s...`, data);
+                        executeTmdbDirectPlayback(serverIndex + 1, resumePos || 0);
                     });
                 } else {
                     let initialStreamUrl = tmdbDirectStreamUrl;
@@ -16517,13 +16628,7 @@ async function launchSoberanoTorrentPlayback(torrentData, item, season = null, e
     tmdbAligning = false;
     alignPollKey = null;
     clearTimeout(alignPollTimer);
-    clearTimeout(playbackWatchdog);
-    if (hlsPlayer) {
-        hlsPlayer.destroy();
-        hlsPlayer = null;
-    }
-    try { video.pause(); } catch(e) {}
-    Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
+    resetMediaHardware();
 
     const modal = document.getElementById("playerModal");
     const title = item.title || item.name || "Sin título";
