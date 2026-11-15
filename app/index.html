@@ -12691,18 +12691,6 @@
                     }
                     video.play().catch(e => console.log('HLS play waiting for interaction:', e));
                 });
-                hlsPlayer.on(Hls.Events.BUFFER_EOS, () => {
-                    console.log('[AUTOPLAY] Anime HLS BUFFER_EOS alcanzado');
-                    if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                        const cur = video ? (video.currentTime || 0) : 0;
-                        const dur = getEffectiveVideoDuration();
-                        if (dur > 60 && (dur - cur) <= 15.0) {
-                            if (!nextEpCountdownTimer) {
-                                startNextEpisodeCountdown(3);
-                            }
-                        }
-                    }
-                });
                 hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
                         const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
@@ -12817,13 +12805,20 @@
             document.getElementById('playBtnText').textContent = 'Reproducir';
             handlePlayerUserActivity();
 
+            function isGrowingLiveStream() {
+                if (typeof hlsPlayer !== 'undefined' && hlsPlayer && hlsPlayer.levels && hlsPlayer.levels[0] && hlsPlayer.levels[0].details) {
+                    const d = hlsPlayer.levels[0].details;
+                    if (d.type === 'EVENT' || d.live || !d.endList) return true;
+                }
+                return false;
+            }
+
             // SOBERANO EOF GUARD: Solo para streams VOD terminados que no sean en directo ni HLS live/event
             if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                const isLiveHls = typeof hlsPlayer !== 'undefined' && hlsPlayer && hlsPlayer.levels && hlsPlayer.levels[0] && hlsPlayer.levels[0].details && hlsPlayer.levels[0].details.live;
-                if (!isLiveHls) {
+                if (!isGrowingLiveStream()) {
                     const cur = video ? (video.currentTime || 0) : 0;
                     const dur = getEffectiveVideoDuration();
-                    if (dur >= 600 && cur >= 500 && (dur - cur <= 3.0 || cur >= dur - 1.0)) {
+                    if (dur >= 600 && cur >= 480 && (dur - cur <= 3.0 || cur >= dur - 1.0)) {
                         console.log(`[AUTOPLAY] Stream pausado al final (EOF sin ended: cur=${cur.toFixed(1)}, dur=${dur.toFixed(1)}). Avanzando automáticamente...`);
                         triggerNextEpisodeNow();
                     }
@@ -12855,16 +12850,18 @@
             }
 
             // SOBERANO AUTOPLAY INTELIGENTE (Apple TV / Netflix): Detección proactiva de créditos y avance continuo
+            // Restringido estrictamente a streams VOD no crecientes con duración real comprobada (>= 10 min) y tras haber visto al menos 8 min
             if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                if (dur > 60 && cur > 30) {
+                const isGrowing = typeof isGrowingLiveStream === 'function' ? isGrowingLiveStream() : false;
+                if (!isGrowing && dur >= 600 && cur >= 480) {
                     const remaining = dur - cur;
                     // Créditos finales: si faltan 15 segundos o menos para el final, mostrar la cuenta regresiva Apple TV
-                    if (remaining <= 15.0 && remaining > 1.5) {
+                    if (remaining <= 15.0 && remaining > 2.0) {
                         if (!nextEpCountdownTimer) {
                             console.log(`[AUTOPLAY] Créditos finales detectados (restan ${remaining.toFixed(1)}s). Iniciando tarjeta Apple TV...`);
                             startNextEpisodeCountdown(Math.min(5, Math.max(2, Math.floor(remaining))));
                         }
-                    } else if (remaining <= 1.5 && remaining >= 0) {
+                    } else if (remaining <= 2.0 && remaining >= 0) {
                         // Fin absoluto alcanzado: avanzar de inmediato
                         console.log(`[AUTOPLAY] Fin del episodio alcanzado (restan ${remaining.toFixed(1)}s). Avanzando ya...`);
                         triggerNextEpisodeNow();
@@ -13265,13 +13262,13 @@
                     document.getElementById('ramScrubberFill').style.width = `${Math.min(100, ramPct)}%`;
                 } catch(e) {}
 
-                // AutoPlay Heartbeat Guard: Si el video está en los últimos segundos o detenido al final
+                // AutoPlay Heartbeat Guard: Solo para streams VOD terminados con duración real comprobada
                 if (video && autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                    const isLiveHls = typeof hlsPlayer !== 'undefined' && hlsPlayer && hlsPlayer.levels && hlsPlayer.levels[0] && hlsPlayer.levels[0].details && hlsPlayer.levels[0].details.live;
-                    if (!isLiveHls) {
+                    const isGrowing = typeof isGrowingLiveStream === 'function' ? isGrowingLiveStream() : false;
+                    if (!isGrowing) {
                         const cur = video.currentTime || 0;
                         const dur = getEffectiveVideoDuration();
-                        if (dur >= 600 && cur >= 500) {
+                        if (dur >= 600 && cur >= 480) {
                             const rem = dur - cur;
                             if (rem <= 2.0 && !video.paused) {
                                 console.log(`[AUTOPLAY HEARTBEAT] Video VOD finalizado (rem=${rem.toFixed(1)}s). Avanzando al siguiente episodio...`);
@@ -15646,8 +15643,6 @@
                         maxBufferSize: 32 * 1024 * 1024,
                         maxBufferHole: 1.0,
                         highBufferWatchdogPeriod: 2,
-                        liveSyncDurationCount: 3,
-                        liveMaxLatencyDurationCount: 30,
                         enableWorker: false,
                         progressive: true,
                         renderTextTracksNatively: false
@@ -15658,6 +15653,13 @@
                     } catch(e) {}
                     hlsPlayer.loadSource(tmdbDirectStreamUrl);
                     hlsPlayer.attachMedia(video);
+                    hlsPlayer.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+                        if (data && data.details) {
+                            // En transcodificaciones progresivas de video (event playlist), forzar live=false
+                            // para que Hls.js NUNCA adelante la reproducción hacia el borde del buffer
+                            data.details.live = false;
+                        }
+                    });
                     hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
                         clearTimeout(playbackWatchdog);
                         if (hlsPlayer) hlsPlayer.subtitleDisplay = false;
@@ -15671,18 +15673,6 @@
                             hlsPlayer.subtitleTrack = -1;
                         }
                         enforceSpanishTracks(video);
-                    });
-                    hlsPlayer.on(Hls.Events.BUFFER_EOS, () => {
-                        console.log('[AUTOPLAY] TMDB/Torrent HLS BUFFER_EOS alcanzado');
-                        if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
-                            const cur = video ? (video.currentTime || 0) : 0;
-                            const dur = getEffectiveVideoDuration();
-                            if (dur > 60 && (dur - cur) <= 15.0) {
-                                if (!nextEpCountdownTimer) {
-                                    startNextEpisodeCountdown(3);
-                                }
-                            }
-                        }
                     });
                     hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                         if (!data.fatal) {
