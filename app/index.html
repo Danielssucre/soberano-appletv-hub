@@ -192,20 +192,20 @@
         }
 
         :root {
-            --bg-base: #07080b;
-            --bg-elevated: #0f131a;
-            --glass-bg: rgba(255, 255, 255, 0.07);
-            --glass-bg-hover: rgba(255, 255, 255, 0.14);
-            --glass-border: rgba(255, 255, 255, 0.12);
-            --glass-border-focus: rgba(255, 255, 255, 0.7);
+            --bg-base: #000000;
+            --bg-elevated: #0a0a0c;
+            --glass-bg: rgba(255, 255, 255, 0.06);
+            --glass-bg-hover: rgba(255, 255, 255, 0.12);
+            --glass-border: rgba(255, 255, 255, 0.10);
+            --glass-border-focus: #ffffff;
             --text-primary: #ffffff;
-            --text-secondary: rgba(255, 255, 255, 0.65);
-            --text-muted: rgba(255, 255, 255, 0.42);
-            --apple-blue: #0071e3;
-            --apple-blue-hover: #0077ed;
-            --apple-cyan: #38bdf8;
-            --apple-emerald: #10b981;
-            --apple-glow: rgba(0, 113, 227, 0.35);
+            --text-secondary: rgba(255, 255, 255, 0.72);
+            --text-muted: rgba(255, 255, 255, 0.45);
+            --apple-blue: #0a84ff;
+            --apple-blue-hover: #409cff;
+            --apple-cyan: #ffffff;
+            --apple-emerald: #30d158;
+            --apple-glow: rgba(255, 255, 255, 0.35);
             --radius-xl: 24px;
             --radius-lg: 18px;
             --radius-md: 12px;
@@ -227,13 +227,13 @@
         }
 
         body {
-            background-color: var(--bg-base);
+            background-color: #000000;
             color: var(--text-primary);
             font-family: var(--font-family);
             min-height: 100vh;
             overflow-x: hidden;
             overflow-y: auto;
-            background: radial-gradient(ellipse 90% 45% at 50% -5%, #182333 0%, #07080b 70%);
+            background: #000000;
             -webkit-font-smoothing: antialiased;
         }
 
@@ -2076,27 +2076,39 @@
         }
 
         .genre-chip {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: var(--text-muted);
-            font-size: 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 15px;
             font-weight: 600;
-            padding: 5px 14px;
-            border-radius: 14px;
+            padding: 10px 22px;
+            min-height: 44px;
+            border-radius: 22px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: transform 0.12s ease-out, background 0.12s ease-out;
             white-space: nowrap;
         }
 
         .genre-chip:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.16);
             color: #ffffff;
         }
 
         .genre-chip.active {
-            background: var(--apple-blue);
-            color: #ffffff;
-            border-color: var(--apple-blue);
+            background: #ffffff;
+            color: #000000;
+            border-color: #ffffff;
+            font-weight: 700;
+            box-shadow: 0 4px 18px rgba(255, 255, 255, 0.3);
+        }
+
+        /* Erradicar porcentajes crudos en Seguir Viendo y habilitar elevación sobre reproductor */
+        .card-pill-tag {
+            display: none !important;
+        }
+
+        .sheet-overlay.above-player {
+            z-index: 6000 !important;
         }
 
         /* Catalog Grid: 30 cards */
@@ -2627,22 +2639,24 @@
             contain: content !important;
         }
 
-        /* 3. Aceleración 3D pura en foco activo (60 FPS sin tirones) */
-        .tv-card.tv-focused, .catalog-card.tv-focused, .tv-card:focus, .catalog-card:focus {
-            transform: translate3d(0, -6px, 0) scale3d(1.04, 1.04, 1) !important;
-            outline: 3px solid #38bdf8 !important;
+        /* 3. Aceleración 3D pura en foco activo (tvOS 18 Specular White 60 FPS) */
+        .tv-card.tv-focused, .catalog-card.tv-focused, .tv-card:focus, .catalog-card:focus,
+        .tv-poster-card.tv-focused, .tv-poster-card:focus {
+            transform: translate3d(0, -6px, 0) scale3d(1.06, 1.06, 1) !important;
+            outline: 3px solid #ffffff !important;
             outline-offset: 4px !important;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.8) !important;
-            z-index: 10 !important;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.95), 0 0 16px rgba(255,255,255,0.4) !important;
+            z-index: 25 !important;
             transition: transform 0.08s cubic-bezier(0.2, 0.9, 0.4, 1) !important;
         }
 
         .genre-chip.tv-focused, .genre-chip:focus, .nav-item.tv-focused, .nav-item:focus {
-            transform: translate3d(0, -2px, 0) scale3d(1.05, 1.05, 1) !important;
-            outline: 2px solid #38bdf8 !important;
-            background: #2563eb !important;
-            color: #fff !important;
-            transition: transform 0.06s ease-out !important;
+            transform: translate3d(0, -2px, 0) scale3d(1.06, 1.06, 1) !important;
+            outline: none !important;
+            box-shadow: 0 0 0 3px #ffffff, 0 8px 24px rgba(0, 0, 0, 0.7) !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            transition: transform 0.08s ease-out !important;
         }
 
         /* 4. Optimización de imágenes y desplazamiento */
@@ -2865,9 +2879,9 @@
                 display: flex !important;
                 align-items: center !important;
                 justify-content: space-between !important;
-                background: rgba(7, 8, 11, 0.88) !important;
-                backdrop-filter: blur(25px) saturate(180%) !important;
-                -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
+                background: rgba(10, 10, 12, 0.98) !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
                 z-index: 1000 !important;
                 box-sizing: border-box !important;
@@ -2911,9 +2925,9 @@
                 width: 100% !important;
                 height: calc(50px + var(--sab)) !important;
                 padding-bottom: var(--sab) !important;
-                background: rgba(10, 14, 22, 0.94) !important;
-                backdrop-filter: blur(25px) saturate(180%) !important;
-                -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
+                background: rgba(10, 10, 12, 0.98) !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
                 border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
                 z-index: 9999 !important;
                 box-sizing: border-box !important;
@@ -3392,8 +3406,9 @@
                 padding: 2px 6px !important;
                 font-size: 9px !important;
                 border-radius: 4px !important;
-                backdrop-filter: blur(8px) !important;
-                -webkit-backdrop-filter: blur(8px) !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+                background: rgba(0, 0, 0, 0.75) !important;
             }
 
             .catalog-card-info {
@@ -3893,18 +3908,18 @@
                 </div>
                 <div class="genres-scroll-container">
                     <div class="genres-track" id="genresFilterTrack">
-                        <button class="genre-chip active" onclick="setCatalogGenre('', this)">★ Todos los géneros</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('isekai', this)">🌀 Isekai</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('shounen', this)">⚡ Shounen</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('seinen', this)">⚔️ Seinen</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('accion', this)">🔥 Acción</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('fantasia', this)">🪄 Fantasía</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('aventura', this)">🗺️ Aventura</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('comedia', this)">🎭 Comedia</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('romance', this)">🌸 Romance</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('sci-fi', this)">🚀 Sci-Fi</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('sobrenatural', this)">👁️ Sobrenatural</button>
-                        <button class="genre-chip" onclick="setCatalogGenre('artes-marciales', this)">🥋 Artes Marciales</button>
+                        <button class="genre-chip active" onclick="setCatalogGenre('', this)">Todos los géneros</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('isekai', this)">Isekai</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('shounen', this)">Shounen</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('seinen', this)">Seinen</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('accion', this)">Acción</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('fantasia', this)">Fantasía</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('aventura', this)">Aventura</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('comedia', this)">Comedia</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('romance', this)">Romance</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('sci-fi', this)">Ciencia Ficción</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('sobrenatural', this)">Sobrenatural</button>
+                        <button class="genre-chip" onclick="setCatalogGenre('artes-marciales', this)">Artes Marciales</button>
                     </div>
                 </div>
             </section>
@@ -11286,7 +11301,7 @@
                 card.onclick = () => resumeContinueItem(item);
                 card.innerHTML = `
                     <div class="card-thumbnail-wrap">
-                        <img class="card-img" src="${item.thumb || getCanonicalPoster(item.animeId, item.title)}" alt="${item.title}" loading="lazy" onerror="handleImageError(this, '${item.animeId || ''}', '${(item.title || '').replace(/'/g, "\\'")}')">
+                        <img class="card-img" src="${item.thumb || getCanonicalPoster(item.animeId, item.title)}" alt="${item.title}" loading="lazy" decoding="async" onerror="handleImageError(this, '${item.animeId || ''}', '${(item.title || '').replace(/'/g, "\\'")}')">
                         <span class="card-pill-tag">${item.progressPct}%</span>
                         <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
                         <div class="card-progress-bar">
@@ -11397,7 +11412,7 @@
                 card.onclick = () => openDetailsSheet(anime);
                 card.innerHTML = `
                     <div class="card-thumbnail-wrap">
-                        <img class="card-img" src="${anime.banner || anime.poster || getCanonicalPoster(anime.id || anime.slug, anime.title)}" alt="${anime.title}" loading="lazy" onerror="handleImageError(this, '${anime.id || anime.slug || ''}', '${(anime.title || '').replace(/'/g, "\\'")}')">
+                        <img class="card-img" src="${anime.banner || anime.poster || getCanonicalPoster(anime.id || anime.slug, anime.title)}" alt="${anime.title}" loading="lazy" decoding="async" onerror="handleImageError(this, '${anime.id || anime.slug || ''}', '${(anime.title || '').replace(/'/g, "\\'")}')">
                         <span class="card-pill-tag">Bóveda • 4K</span>
                         <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
                     </div>
@@ -11460,7 +11475,7 @@
                 card.onclick = () => openDetailsSheet(anime);
                 card.innerHTML = `
                     <div class="card-thumbnail-wrap">
-                        <img class="card-img" src="${anime.banner || anime.poster || getCanonicalPoster(anime.id || anime.slug, anime.title)}" alt="${anime.title}" loading="lazy" onerror="handleImageError(this, '${anime.id || anime.slug || ''}', '${(anime.title || '').replace(/'/g, "\\'")}')">
+                        <img class="card-img" src="${anime.banner || anime.poster || getCanonicalPoster(anime.id || anime.slug, anime.title)}" alt="${anime.title}" loading="lazy" decoding="async" onerror="handleImageError(this, '${anime.id || anime.slug || ''}', '${(anime.title || '').replace(/'/g, "\\'")}')">
                         <span class="card-pill-tag" style="background: rgba(56, 189, 248, 0.25); color: #38bdf8;">★ ${anime.rating || '9.0'}</span>
                         <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
                     </div>
@@ -11515,7 +11530,7 @@
 
                 card.innerHTML = `
                     <div class="poster-wrap">
-                        <img class="poster-img" src="${item.poster || getCanonicalPoster(item.slug, cleanTitle)}" alt="${cleanTitle}" loading="lazy" onerror="handleImageError(this, '${item.slug || ''}', '${cleanTitle.replace(/'/g, "\\'")}')">
+                        <img class="poster-img" src="${item.poster || getCanonicalPoster(item.slug, cleanTitle)}" alt="${cleanTitle}" loading="lazy" decoding="async" onerror="handleImageError(this, '${item.slug || ''}', '${cleanTitle.replace(/'/g, "\\'")}')">
                         ${isRanked && item.rank ? `<div class="rank-number-overlay">${item.rank}</div>` : ''}
                         ${!isRanked && item.latest_ep ? `<span class="card-pill-tag">Ep ${item.latest_ep}</span>` : ''}
                         <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
@@ -11553,6 +11568,7 @@
         // I. MODAL SHEET: DETALLES Y EPISODIOS (APPLE TV HIG)
         // ==========================================
         function openDetailsSheet(anime) {
+            FocusManager.push(document.activeElement);
             activeAnime = anime;
             activeTmdbItem = null;
             activeSeasonIndex = 0;
@@ -11633,6 +11649,10 @@
             }
 
             overlay.classList.add('active');
+            setTimeout(() => {
+                const firstFocus = overlay.querySelector('.season-tab, .ep-row-card, .sheet-close-btn');
+                if (firstFocus && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstFocus, true);
+            }, 80);
         }
 
         function selectSeasonTab(sIdx) {
@@ -11688,6 +11708,7 @@
         }
 
         async function openScrapedAnimeDetails(item) {
+            FocusManager.push(document.activeElement);
             const overlay = document.getElementById('sheetOverlay');
             const cleanTitle = (item.title && item.title.toLowerCase() !== 'ver ahora') ? item.title : (item.slug || '').replace(/-/g, ' ');
             document.getElementById('sheetBannerImg').src = item.poster || getCanonicalPoster(item.slug, cleanTitle);
@@ -11702,6 +11723,10 @@
             const listContainer = document.getElementById('sheetEpisodesList');
             listContainer.innerHTML = '<div class="apple-spinner"></div>';
             overlay.classList.add('active');
+            setTimeout(() => {
+                const firstFocus = overlay.querySelector('.season-tab, .ep-row-card, .sheet-close-btn');
+                if (firstFocus && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstFocus, true);
+            }, 80);
 
             // SOBERANO INTENT PRE-BUFFER: Cache Master Playlist & first 3 chunks into Mac M3 RAM
             if (item.slug) {
@@ -11784,7 +11809,10 @@
 
         function closeSheet(e) {
             if (e && e.target !== document.getElementById('sheetOverlay') && !e.target.closest('.sheet-close-btn')) return;
-            document.getElementById('sheetOverlay').classList.remove('active');
+            const overlay = document.getElementById('sheetOverlay');
+            overlay.classList.remove('active');
+            overlay.classList.remove('above-player');
+            FocusManager.popAndRestore();
         }
 
         // ==========================================
@@ -12347,6 +12375,10 @@
             document.getElementById('playerSeriesTitle').textContent = anime.title;
             document.getElementById('playerEpTitle').textContent = episode.title || `Episodio ${episode.episode}`;
             modal.classList.add('active');
+            setTimeout(() => {
+                const btnPlay = document.getElementById('btnPlayPause');
+                if (btnPlay && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(btnPlay);
+            }, 100);
 
             // Reset player visual state
             resetPlayerControls();
@@ -13147,6 +13179,9 @@
         }
 
         function openEpisodesFromPlayer() {
+            FocusManager.push(document.getElementById('btnListEps') || document.getElementById('btnPlayPause'));
+            const overlay = document.getElementById('sheetOverlay');
+            if (overlay) overlay.classList.add('above-player');
             if (currentTmdbPlaying && currentTmdbPlaying.item) {
                 openTmdbDetailsSheet(currentTmdbPlaying.item, currentTmdbPlaying.item.media_type || 'tv');
             } else if (activeAnime) {
@@ -13180,6 +13215,7 @@
             }
             clearInterval(statsInterval);
             document.getElementById('playerModal').classList.remove('active');
+            FocusManager.popAndRestore();
         }
 
         // Polling sutil de Telemetría RAM (/stats)
@@ -13242,6 +13278,7 @@
         // K. BÚSQUEDA UNIVERSAL APPLE TV
         // ==========================================
         function openSearchModal() {
+            FocusManager.push(document.activeElement);
             const modal = document.getElementById('searchModal');
             modal.classList.add('active');
             const inp = document.getElementById('universalSearchInput');
@@ -13253,6 +13290,7 @@
         function closeSearchModal(e) {
             if (e && e.target !== document.getElementById('searchModal') && !e.target.closest('.search-close-x')) return;
             document.getElementById('searchModal').classList.remove('active');
+            FocusManager.popAndRestore('#tabSearch, #universalSearchInput');
         }
 
         function renderInitialSearchResults() {
@@ -13338,7 +13376,7 @@
             const safeTitle = title.replace(/'/g, '');
             card.innerHTML = `
                 <div class="poster-wrap">
-                    <img class="poster-img" src="${item.poster || item.banner}" alt="${title}" loading="lazy" onerror="handleImageError(this, '${safeId}', '${safeTitle}')">
+                    <img class="poster-img" src="${item.poster || item.banner}" alt="${title}" loading="lazy" decoding="async" onerror="handleImageError(this, '${safeId}', '${safeTitle}')">
                     <span class="card-pill-tag">${item.isLocal ? 'Bóveda' : 'Online'}</span>
                     <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
                 </div>
@@ -13454,6 +13492,11 @@
                     if (totalBadge) totalBadge.textContent = `${Number(data.total).toLocaleString()} Series • HD`;
                 }
 
+                // Poda LRU de memoria RAM en TV LG (máx 12 páginas en caché)
+                const cacheKeys = Object.keys(catalogCache);
+                if (cacheKeys.length >= 12) {
+                    delete catalogCache[cacheKeys[0]];
+                }
                 catalogCache[cacheKey] = data.animes || [];
                 renderCatalogCards(data.animes || []);
             } catch(e) {
@@ -13490,7 +13533,7 @@
 
                 card.innerHTML = `
                     <div class="catalog-poster-wrap">
-                        <img class="catalog-poster-img" src="${item.poster}" alt="${cleanTitle}" loading="lazy" onerror="this.src='https://cdn.jkdesa.com/assets/images/animes/image/${item.slug}.jpg'">
+                        <img class="catalog-poster-img" src="${item.poster}" alt="${cleanTitle}" loading="lazy" decoding="async" onerror="this.src='https://cdn.jkdesa.com/assets/images/animes/image/${item.slug}.jpg'">
                         <span class="catalog-type-pill">${item.type || 'TV'}</span>
                         <div class="catalog-status-dot ${statusClass}">
                             <span style="width:6px; height:6px; border-radius:50%; background:currentColor;"></span>
@@ -13709,6 +13752,38 @@
         }
 
         // ========================================================
+        // SOBERANO FOCUS MANAGER & LIFO STACK ENGINE (tvOS 18)
+        // ========================================================
+        const FocusManager = {
+            history: [],
+            isPointerMode: false,
+
+            push(currentEl) {
+                if (currentEl && typeof currentEl.focus === 'function') {
+                    this.history.push(currentEl);
+                }
+            },
+
+            popAndRestore(fallbackSelector = '#trackContinue .tv-card') {
+                const prev = this.history.pop();
+                if (prev && document.body.contains(prev)) {
+                    SpatialNav.focusElement(prev, true);
+                } else {
+                    const fallback = document.querySelector(fallbackSelector) || 
+                                     document.querySelector('.catalog-card, .tv-card, .genre-chip.active, .nav-item.active');
+                    if (fallback) SpatialNav.focusElement(fallback, true);
+                }
+            }
+        };
+
+        window.addEventListener('mousemove', () => { FocusManager.isPointerMode = true; }, { passive: true });
+        window.addEventListener('keydown', (e) => {
+            if ([37, 38, 39, 40, 13, 27, 461].includes(e.keyCode)) {
+                FocusManager.isPointerMode = false;
+            }
+        }, { capture: true });
+
+        // ========================================================
         // 2D SPATIAL NAVIGATION ENGINE (tvOS / Apple TV & Netflix)
         // High-Performance Euclidean Nearest-Neighbor for Smart TVs
         // ========================================================
@@ -13716,14 +13791,14 @@
             focusableSelector: '.nav-item, .tv-card, .tv-poster-card, .catalog-card, .ep-row-card, .soberano-torrent-item, .btn-apple-primary, .btn-apple-secondary, .btn-ctrl, .season-tab, .filter-pill, .type-pill, .genre-chip, .btn-page-nav, .sheet-close-btn, .search-close-x, button, input, textarea, [tabindex="0"]',
 
             getActiveContext() {
-                const playerModal = document.getElementById('playerModal');
-                const sheetOverlay = document.getElementById('sheetOverlay');
-                const searchModal = document.getElementById('searchModal');
                 const swarmModal = document.getElementById('soberanoSwarmModal');
+                const sheetOverlay = document.getElementById('sheetOverlay');
+                const playerModal = document.getElementById('playerModal');
+                const searchModal = document.getElementById('searchModal');
 
-                if (playerModal && playerModal.classList.contains('active')) return playerModal;
                 if (swarmModal && swarmModal.classList.contains('active')) return swarmModal;
                 if (sheetOverlay && sheetOverlay.classList.contains('active')) return sheetOverlay;
+                if (playerModal && playerModal.classList.contains('active')) return playerModal;
                 if (searchModal && searchModal.classList.contains('active')) return searchModal;
                 return document.body;
             },
@@ -13733,8 +13808,7 @@
                 const elements = Array.from(root.querySelectorAll(this.focusableSelector));
                 return elements.filter(el => {
                     if (el.disabled || el.getAttribute('aria-hidden') === 'true') return false;
-                    const style = window.getComputedStyle(el);
-                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    if (el.offsetParent === null && el !== document.activeElement) return false;
                     const rect = el.getBoundingClientRect();
                     return rect.width > 5 && rect.height > 5;
                 });
@@ -13841,7 +13915,7 @@
                 }
             },
 
-            focusElement(el) {
+            focusElement(el, forceScroll = false) {
                 if (!el) return;
                 
                 // Limpiar clase anterior en el DOM
@@ -13851,27 +13925,28 @@
 
                 el.classList.add('tv-focused');
                 try {
-                    el.focus();
+                    el.focus({ preventScroll: true });
                 } catch(e) {}
 
-                // Desplazamiento horizontal para elementos en carrusel
-                const shelf = el.closest('.shelf-track, .shelf-scroll, .genres-track, .catalog-filter-bar, .season-tabs-row');
-                if (shelf) {
-                    const shelfRect = shelf.getBoundingClientRect();
-                    const elRect = el.getBoundingClientRect();
-                    const targetLeft = shelf.scrollLeft + (elRect.left - shelfRect.left) - (shelfRect.width / 2) + (elRect.width / 2);
-                    shelf.scrollTo({ left: targetLeft, behavior: 'smooth' });
-                }
+                // Desplazamiento y centrado suave: solo en modo D-Pad o con forceScroll explícito (evita temblor en Magic Remote)
+                if (!FocusManager.isPointerMode || forceScroll) {
+                    const shelf = el.closest('.shelf-track, .shelf-scroll, .genres-track, .catalog-filter-bar, .season-tabs-row');
+                    if (shelf) {
+                        const shelfRect = shelf.getBoundingClientRect();
+                        const elRect = el.getBoundingClientRect();
+                        const targetLeft = shelf.scrollLeft + (elRect.left - shelfRect.left) - (shelfRect.width / 2) + (elRect.width / 2);
+                        shelf.scrollTo({ left: targetLeft, behavior: 'smooth' });
+                    }
 
-                // Auto-desplazamiento vertical dentro de contenedores de lista o cuadrícula
-                const scrollParent = el.closest('.search-results-grid, .episodes-list, #soberanoTorrentList, .sheet-body');
-                if (scrollParent) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-                } else {
-                    const rect = el.getBoundingClientRect();
-                    const vh = window.innerHeight || document.documentElement.clientHeight;
-                    if (rect.top < 100 || rect.bottom > vh - 100) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                    const scrollParent = el.closest('.search-results-grid, .episodes-list, #soberanoTorrentList, .sheet-body');
+                    if (scrollParent) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                    } else {
+                        const rect = el.getBoundingClientRect();
+                        const vh = window.innerHeight || document.documentElement.clientHeight;
+                        if (rect.top < 100 || rect.bottom > vh - 100) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                        }
                     }
                 }
 
@@ -13887,13 +13962,16 @@
 
         // Teclado Magic Keyboard / Apple Remote / Smart TV D-Pad & Magic Remote Pointer
         function initKeyboardShortcuts() {
-            // Soporte Híbrido: Magic Remote Pointer / Ratón de TV
-            // Cuando el usuario mueve el puntero físico del Magic Remote y sobrevuela una tarjeta,
-            // sincronizar el foco de SpatialNav automáticamente sin reiniciar la selección.
+            // Soporte Híbrido: Magic Remote Pointer / Ratón de TV (CERO Jitter)
             document.addEventListener('mouseover', (e) => {
                 const target = e.target.closest(SpatialNav.focusableSelector);
                 if (target && target !== document.activeElement) {
-                    SpatialNav.focusElement(target);
+                    FocusManager.isPointerMode = true;
+                    document.querySelectorAll('.tv-focused').forEach(node => {
+                        if (node !== target) node.classList.remove('tv-focused');
+                    });
+                    target.classList.add('tv-focused');
+                    try { target.focus({ preventScroll: true }); } catch(err) {}
                 }
             }, { passive: true });
 
@@ -13911,8 +13989,19 @@
                         cancelNextEpisodeCountdown();
                         return true;
                     }
-                    const isPlayer = document.getElementById('playerModal').classList.contains('active');
+                    const isSwarm = document.getElementById('soberanoSwarmModal') && document.getElementById('soberanoSwarmModal').classList.contains('active');
+                    if (isSwarm) {
+                        closeSoberanoSwarmModal();
+                        return true;
+                    }
                     const isSheet = document.getElementById('sheetOverlay').classList.contains('active');
+                    if (isSheet && document.getElementById('sheetOverlay').classList.contains('above-player')) {
+                        closeSheet();
+                        const playBtn = document.getElementById('btnPlayPause');
+                        if (playBtn) SpatialNav.focusElement(playBtn, true);
+                        return true;
+                    }
+                    const isPlayer = document.getElementById('playerModal').classList.contains('active');
                     const isSearch = document.getElementById('searchModal').classList.contains('active');
                     if (isPlayer) {
                         closePlayer();
@@ -13960,10 +14049,9 @@
                         }
                         return;
                     }
-                    // Flecha arriba: desenfocar e ir hacia el navbar/cabecera
+                    // Flecha arriba: navegar sin blur destructivo de coordenadas
                     if (e.keyCode === 38) {
                         e.preventDefault();
-                        document.activeElement.blur();
                         SpatialNav.navigate('up');
                         return;
                     }
@@ -14001,6 +14089,7 @@
                 const isPlayer = document.getElementById('playerModal').classList.contains('active');
                 const isSheet = document.getElementById('sheetOverlay').classList.contains('active');
                 const isSearch = document.getElementById('searchModal').classList.contains('active');
+                const isSwarm = document.getElementById('soberanoSwarmModal') && document.getElementById('soberanoSwarmModal').classList.contains('active');
 
                 // Botón Back de LG webOS (461 / GoBack / Escape)
                 if (e.key === 'Escape' || e.key === 'GoBack' || e.keyCode === 461) {
@@ -14010,24 +14099,22 @@
                         cancelNextEpisodeCountdown();
                         return;
                     }
+                    if (isSwarm) {
+                        closeSoberanoSwarmModal();
+                        return;
+                    }
+                    if (isSheet && document.getElementById('sheetOverlay').classList.contains('above-player')) {
+                        closeSheet();
+                        const playBtn = document.getElementById('btnPlayPause');
+                        if (playBtn) SpatialNav.focusElement(playBtn, true);
+                        return;
+                    }
                     if (isPlayer) {
                         closePlayer();
-                        setTimeout(() => {
-                            const initial = document.querySelector('#trackContinue .tv-card, .genre-chip.active, .catalog-card');
-                            if (initial) SpatialNav.focusElement(initial);
-                        }, 200);
                     } else if (isSheet) {
                         closeSheet();
-                        setTimeout(() => {
-                            const initial = document.querySelector('#trackContinue .tv-card, .genre-chip.active, .catalog-card');
-                            if (initial) SpatialNav.focusElement(initial);
-                        }, 200);
                     } else if (isSearch) {
                         closeSearchModal();
-                        setTimeout(() => {
-                            const initial = document.querySelector('#trackContinue .tv-card, .genre-chip.active, .catalog-card');
-                            if (initial) SpatialNav.focusElement(initial);
-                        }, 200);
                     }
                     return;
                 }
@@ -14606,7 +14693,7 @@
 
             card.innerHTML = `
                 <div class="poster-wrap">
-                    <img class="poster-img" src="${poster}" alt="${title}" loading="lazy" onerror="handleImageError(this, '${type}_${item.id}', '${safeTitle}')">
+                    <img class="poster-img" src="${poster}" alt="${title}" loading="lazy" decoding="async" onerror="handleImageError(this, '${type}_${item.id}', '${safeTitle}')">
                     <span class="quality-badge ${qInfo.badgeClass}"><i class="fa ${qInfo.badgeIcon}"></i> ${qInfo.badgeText}</span>
                     <span class="card-pill-tag">${type === 'movie' ? '🎬 Película' : '📺 Serie'}</span>
                     <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
@@ -14620,6 +14707,7 @@
         }
 
         async function openTmdbDetailsSheet(item, mediaType = 'movie') {
+            FocusManager.push(document.activeElement);
             activeTmdbItem = { ...item, media_type: mediaType };
             activeAnime = null;
 
@@ -14686,6 +14774,10 @@
             }
 
             overlay.classList.add('active');
+            setTimeout(() => {
+                const firstFocus = overlay.querySelector('#btnSheetPlayMovie, .season-tab, .ep-row-card, .sheet-close-btn');
+                if (firstFocus && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstFocus, true);
+            }, 80);
 
             try {
                 let full = {};
@@ -15089,6 +15181,10 @@
             document.getElementById('playerSeriesTitle').textContent = title;
             document.getElementById('playerEpTitle').textContent = `${epLabel} • Conectando Stream...`;
             modal.classList.add('active');
+            setTimeout(() => {
+                const btnPlay = document.getElementById('btnPlayPause');
+                if (btnPlay && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(btnPlay);
+            }, 100);
             startStatsPolling();
 
             if (wantSubs && !customSub) {
@@ -16043,7 +16139,7 @@ function createSoberanoCard(item, mediaType = 'movie') {
 
     card.innerHTML = `
         <div class="poster-container">
-            <img class="poster-img" src="${poster}" alt="${escapeHtml(title)}" loading="lazy" onerror="handleImageError(this)">
+            <img class="poster-img" src="${poster}" alt="${escapeHtml(title)}" loading="lazy" decoding="async" onerror="handleImageError(this)">
             <span class="card-pill-tag" style="background:rgba(217,70,239,0.7);"><i class="fa fa-infinity"></i> Torrent</span>
             <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
         </div>
@@ -16151,6 +16247,7 @@ let currentSoberanoEpisode = 1;
 let soberanoCachedVideos = [];
 
 async function openSoberanoSwarmModal(item, mediaType = 'movie', targetSeason = 1, targetEpisode = 1) {
+    FocusManager.push(document.activeElement);
     const isTv = mediaType === 'tv' || mediaType === 'series' || item.type === 'tv' || item.media_type === 'tv' || item.mediaType === 'tv' || !!item.season;
     activeSoberanoItem = { ...item, mediaType: isTv ? 'tv' : 'movie' };
     currentSoberanoSeason = parseInt(targetSeason || 1, 10) || 1;
@@ -16173,6 +16270,10 @@ async function openSoberanoSwarmModal(item, mediaType = 'movie', targetSeason = 
     if (listEl) listEl.innerHTML = '<div style="color:var(--text-muted); padding:30px; text-align:center;"><i class="fa fa-spinner fa-spin fa-2x"></i><p style="margin-top:10px;">Consultando enjambre global de torrents...</p></div>';
 
     modal.classList.add('active');
+    setTimeout(() => {
+        const firstFocus = modal.querySelector('.season-tab, .torrent-item-card, .sheet-close-btn');
+        if (firstFocus && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstFocus, true);
+    }, 100);
 
     // Configuración del selector de Episodios si es Serie o Anime
     if (isTv && epBar) {
@@ -16190,6 +16291,7 @@ function closeSoberanoSwarmModal(e) {
     if (e && e.target !== document.getElementById('soberanoSwarmModal') && !e.target.closest('.sheet-close-btn')) return;
     const modal = document.getElementById('soberanoSwarmModal');
     if (modal) modal.classList.remove('active');
+    FocusManager.popAndRestore();
 }
 
 async function initSoberanoSeasonEpisodeSelectors(item, targetSeason = 1, targetEpisode = 1) {

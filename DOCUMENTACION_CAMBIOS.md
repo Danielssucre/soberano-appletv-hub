@@ -365,3 +365,30 @@ Resuelve de raíz el fallo crítico reportado en televisor LG donde una serie en
    ./deploy_to_tv.sh
    ```
    *(Requiere Developer Mode encendido en la TV, llave SSH `~/.ssh/tv_webos` y CLI `ares-*` en macOS. El script detecta la IP nueva automáticamente, genera el IPK, lo instala y abre la app).*
+
+---
+
+## 14. Auditoría Integral de Diseño, Ergonomía y Rendimiento 10-foot UI (Soberano Studios Inc.)
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html)
+* [`iPad_Soberano_Anime_Vault.html`](../mushoko/iPad_Soberano_Anime_Vault.html)
+
+### 🎯 ¿Para qué sirve?
+Eleva la experiencia visual y de control en la LG Smart TV (webOS) al estándar Apple TV HIG (tvOS 18), eliminando el jitter del puntero Magic Remote, las fugas de foco tras cerrar modales, el sobreesfuerzo de GPU por desenfoques gaussianos y los fondos grisáceos que impedían el apagado de píxeles en paneles OLED.
+
+### ⚙️ ¿Cómo funciona?
+1. **True OLED Black (`#000000` puro):**
+   * Se unificaron `--bg-base: #000000;`, `--bg-elevated: #0a0a0c;` y `body { background: #000000; }`. Los subpíxeles de los paneles LG OLED se apagan completamente en fondos y barras de navegación, alcanzando contraste infinito.
+2. **Erradicación de `backdrop-filter: blur(...)` Parásitos:**
+   * Se eliminaron las reglas forzadas al final del CSS que inyectaban `blur(25px)` en modales y hojas flotantes, sustituyéndolas por fondos sólidos opacos de alta fidelidad `rgba(10, 10, 12, 0.98)` que liberan a la GPU Mali de re-renderizados costosos, alcanzando 60 FPS estables en transiciones.
+3. **Focus Ring tvOS 18 con Specular Glow:**
+   * Las tarjetas enfocadas (`.tv-card.tv-focused`, `.catalog-card.tv-focused`, `.tv-poster-card.tv-focused`) reciben una elevación `scale3d(1.06, 1.06, 1)` combinada con un contorno nítido blanco `#FFFFFF` y halo difuso `rgba(255, 255, 255, 0.4)`, visible sin esfuerzo a 3 metros de distancia.
+4. **Cápsulas Ergonómicas de Filtro (Mínimo 44px HIG):**
+   * Se eliminaron emojis infantiles de los chips de género y se garantizó un área táctil / de clic de al menos 44px de altura con tipografía limpia de 15px.
+5. **Erradicación del Bucle Cinético / Jitter en Magic Remote:**
+   * Se desacopló la llamada a `shelf.scrollTo()` en los eventos `mouseover`. El cursor del control giroscópico ahora resalta elementos sin sacudir violentamente el carrusel horizontal.
+6. **Arquitectura `FocusManager` con Pila LIFO:**
+   * Al abrir cualquier modal (`openDetailsSheet`, `openScrapedAnimeDetails`, `openTmdbDetailsSheet`, `openSearchModal`, `openSoberanoSwarmModal`, `openEpisodesFromPlayer`), el elemento previo se almacena en la pila `FocusManager.push(el)`. Al cerrar (`popAndRestore()`), el foco regresa de forma infalible al origen sin resetearse al inicio de la pantalla.
+7. **Poda LRU de Memoria RAM y `decoding="async"`:**
+   * El caché de páginas del catálogo se autolimita a un máximo de 12 páginas para proteger la memoria física del televisor, y todas las portadas incorporan `decoding="async"` para evitar tirones en el hilo principal durante el desplazamiento.
