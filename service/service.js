@@ -137,7 +137,7 @@ const HEADERS = {
 // ==============================================================================
 const RAM_SEGMENT_CACHE = new Map(); // segUrl -> Buffer
 let TOTAL_CACHE_BYTES = 0;
-const MAX_CACHE_BYTES = 45 * 1024 * 1024; // 45 MB bound safe for webOS
+const MAX_CACHE_BYTES = 25 * 1024 * 1024; // 25 MB bound óptimo para silicio webOS
 const IN_FLIGHT_SEGMENTS = new Map(); // segUrl -> Promise<Buffer>
 let CURRENT_PLAYLIST_SEGMENTS = []; // active segment URLs in chronological order
 
@@ -160,13 +160,16 @@ function getMirrorCandidates(segUrl) {
     return list;
 }
 
-function fetchSegmentBinary(targetUrl, timeoutMs = 7000) {
+function fetchSegmentBinary(targetUrl, timeoutMs = 12000, retryCount = 1) {
     return new Promise((resolve, reject) => {
         const candidates = getMirrorCandidates(targetUrl);
         let idx = 0;
 
         function tryNext() {
             if (idx >= candidates.length) {
+                if (retryCount > 0) {
+                    return fetchSegmentBinary(targetUrl, timeoutMs, retryCount - 1).then(resolve).catch(reject);
+                }
                 return reject(new Error('All mirror candidates failed for ' + targetUrl));
             }
             const cand = candidates[idx++];
@@ -186,7 +189,7 @@ function fetchSegmentBinary(targetUrl, timeoutMs = 7000) {
                     if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                         let redir = res.headers.location;
                         if (!redir.startsWith('http')) redir = url.resolve(cand, redir);
-                        return fetchSegmentBinary(redir, timeoutMs).then(resolve).catch(() => tryNext());
+                        return fetchSegmentBinary(redir, timeoutMs, retryCount).then(resolve).catch(() => tryNext());
                     }
                     if (res.statusCode !== 200 && res.statusCode !== 206) {
                         return tryNext();
@@ -1951,14 +1954,14 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
 // 4. STREAM EXTRACTION & NATIVE HLS REWRITER
 // ==============================================================================
 
-async function resolveJkStream(slug, epNum, reqHost, reqProto = "http") {
+async function resolveJkStream(slug, epNum, reqHost, reqProto = "http", forceRefresh = false) {
     let normalizedSlug = slug;
     if (slug === 'mushoku') normalizedSlug = 'mushoku-tensei-isekai-ittara-honki-dasu';
     if (slug === 'black_clover') normalizedSlug = 'black-clover-tv';
 
     const cacheKey = `${normalizedSlug}_${epNum}`;
     const cached = STREAM_CACHE.get(cacheKey);
-    if (cached && (Date.now() - cached.time < 3600000)) {
+    if (!forceRefresh && cached && (Date.now() - cached.time < 3600000)) {
         return cached.data;
     }
 
@@ -3382,12 +3385,13 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === '/api/stream_info') {
         const slug = parsed.query.slug || '';
         const ep = parsed.query.ep || 1;
+        const forceFresh = !!(parsed.query.fresh === '1' || parsed.query.forceRefresh === '1' || parsed.query.fresh === 'true');
 
         let data;
         if (slug === 'ninku') {
             data = resolveNinku(ep, reqHost, reqProto);
         } else {
-            data = await resolveJkStream(slug, ep, reqHost, reqProto);
+            data = await resolveJkStream(slug, ep, reqHost, reqProto, forceFresh);
         }
 
         const jsonStr = JSON.stringify(data);

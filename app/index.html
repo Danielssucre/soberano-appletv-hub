@@ -12496,7 +12496,27 @@
             clearTimeout(playbackWatchdog);
             currentServerIndex = serverIndex;
 
+            const curPos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+
             if (serverIndex >= directServersQueue.length) {
+                if (activeAnime && activeEpisode && !activeEpisode._retriedFresh) {
+                    activeEpisode._retriedFresh = true;
+                    console.warn('[SOBERANO] Servidores agotados, solicitando tokens frescos del CDN...');
+                    const slug = getCanonicalSlug(activeAnime.slug || activeAnime.id, activeAnime.title);
+                    const epNum = activeEpisode.episode;
+                    fetch(`${PROXY_BASE}/api/stream_info?slug=${encodeURIComponent(slug)}&ep=${epNum}&fresh=1&_=${Date.now()}`)
+                        .then(r => r.json())
+                        .then(freshData => {
+                            if (freshData && freshData.servers && freshData.servers.length > 0) {
+                                directServersQueue = freshData.servers;
+                                executeDirectPlayback(0, curPos);
+                            } else {
+                                triggerIframeFallback();
+                            }
+                        })
+                        .catch(() => triggerIframeFallback());
+                    return;
+                }
                 console.warn('Todos los servidores directos agotados, activando Capa 3 Iframe Fail-Safe...');
                 triggerIframeFallback();
                 return;
@@ -12570,24 +12590,26 @@
                 video.addEventListener('loadedmetadata', onMeta);
 
                 video.onerror = (e) => {
-                    console.warn(`AVPlayer error en servidor [${cleanName}], pasando al siguiente...`, e);
+                    const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+                    console.warn(`AVPlayer error en servidor [${cleanName}], pasando al siguiente en pos ${resumePos.toFixed(1)}s...`, e);
                     video.removeEventListener('loadedmetadata', onMeta);
-                    executeDirectPlayback(serverIndex + 1, startTime);
+                    executeDirectPlayback(serverIndex + 1, resumePos);
                 };
             } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                // Motor Hls.js óptimo para LG webOS SmartTV (WebKit/Chromium)
+                // Motor Hls.js optimizado para Apple TV / LG webOS (Buffer térmico acotado a 16MB)
                 if (hlsPlayer) {
                     hlsPlayer.destroy();
                     hlsPlayer = null;
                 }
                 hlsPlayer = new Hls({
-                    maxBufferLength: 90,
-                    maxMaxBufferLength: 240,
-                    maxBufferSize: 60 * 1024 * 1024,
-                    maxBufferHole: 0.5,
-                    highBufferWatchdogPeriod: 2,
+                    startPosition: startTime > 0 ? startTime : -1,
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 60,
+                    maxBufferSize: 16 * 1024 * 1024,
+                    maxBufferHole: 0.8,
+                    highBufferWatchdogPeriod: 3,
                     nudgeOffset: 0.2,
-                    nudgeMaxRetry: 5,
+                    nudgeMaxRetry: 10,
                     lowLatencyMode: false,
                     enableWorker: false,
                     progressive: true
@@ -12596,7 +12618,9 @@
                 hlsPlayer.attachMedia(video);
                 hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
                     clearTimeout(playbackWatchdog);
-                    if (startTime > 0) video.currentTime = startTime;
+                    if (startTime > 0) {
+                        try { video.currentTime = startTime; } catch(e) {}
+                    }
                     video.play().catch(e => console.log('HLS play waiting for interaction:', e));
                 });
                 hlsPlayer.on(Hls.Events.BUFFER_EOS, () => {
@@ -12604,7 +12628,7 @@
                     if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
                         const cur = video ? (video.currentTime || 0) : 0;
                         const dur = getEffectiveVideoDuration();
-                        if (!dur || dur - cur <= 15.0) {
+                        if (dur > 60 && (dur - cur) <= 15.0) {
                             if (!nextEpCountdownTimer) {
                                 startNextEpisodeCountdown(3);
                             }
@@ -12613,8 +12637,27 @@
                 });
                 hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
-                        console.warn(`HLS Fatal en servidor [${cleanName}], pasando al siguiente...`, data);
-                        executeDirectPlayback(serverIndex + 1, startTime);
+                        const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+                        console.warn(`[HLS ERROR] Fatal en servidor [${cleanName}] pos ${resumePos.toFixed(1)}s: type=${data.type}, details=${data.details}`);
+                        
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsPlayer && (hlsPlayer._netRetries || 0) < 3) {
+                            hlsPlayer._netRetries = (hlsPlayer._netRetries || 0) + 1;
+                            console.warn(`[HLS ERROR] Network error recuperable (${hlsPlayer._netRetries}/3), reanudando carga...`, data.details);
+                            setTimeout(() => {
+                                if (hlsPlayer) hlsPlayer.startLoad(resumePos > 0 ? resumePos : -1);
+                            }, 1200);
+                            return;
+                        }
+                        
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsPlayer && !hlsPlayer._mediaRecovered) {
+                            hlsPlayer._mediaRecovered = true;
+                            console.warn('[HLS ERROR] Media error recuperable en webOS, ejecutando recoverMediaError()...', data.details);
+                            hlsPlayer.recoverMediaError();
+                            return;
+                        }
+
+                        console.warn(`[HLS ERROR] Error no recuperable, pasando al siguiente servidor en pos ${resumePos.toFixed(1)}s...`, data);
+                        executeDirectPlayback(serverIndex + 1, resumePos);
                     }
                 });
             } else {
@@ -12624,16 +12667,20 @@
                     initialAnimeUrl = `${PROXY_BASE}/api/hls_sub_master.m3u8?stream=${encodeURIComponent(targetUrl)}&sub=${encodeURIComponent(subHttpUrl)}`;
                 }
                 video.src = initialAnimeUrl;
-                video.play().catch(() => executeDirectPlayback(serverIndex + 1, startTime));
+                video.play().catch(() => {
+                    const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+                    executeDirectPlayback(serverIndex + 1, resumePos);
+                });
             }
 
-            // Watchdog de 7.5 segundos (tiempo prudente para resolución en webOS)
+            // Watchdog de 12 segundos (tiempo prudente para resolución en webOS)
             playbackWatchdog = setTimeout(() => {
                 if (video.readyState === 0 && serverMode === 'native') {
-                    console.warn(`Watchdog 7.5s activado para [${cleanName}], intentando siguiente capa...`);
-                    executeDirectPlayback(serverIndex + 1, startTime);
+                    const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+                    console.warn(`Watchdog 12s activado para [${cleanName}], intentando siguiente capa en pos ${resumePos.toFixed(1)}s...`);
+                    executeDirectPlayback(serverIndex + 1, resumePos);
                 }
-            }, 7500);
+            }, 12000);
         }
 
         // Fallback blindado 0 Anuncios: NUNCA monta un iframe
@@ -12664,7 +12711,8 @@
             
             // Reintento directo en AVPlayer con fuente alternativa si existe (solo anime)
             if (directServersQueue.length > 1 && currentServerIndex === 0) {
-                executeDirectPlayback(1, 0);
+                const resumePos = (video && video.currentTime > 2) ? video.currentTime : 0;
+                executeDirectPlayback(1, resumePos);
             } else {
                 showToast('⚠️ No se pudo obtener la fuente del video');
             }
@@ -15380,7 +15428,8 @@
                     video.removeEventListener('loadedmetadata', video._currentOnLoadedMeta);
                     video._currentOnLoadedMeta = null;
                 }
-                executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+                executeTmdbDirectPlayback(serverIndex + 1, resumePos);
             };
 
             if (isHls) {
@@ -15399,9 +15448,11 @@
                 } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                     hlsPlayer = new Hls({
                         startPosition: startTime > 0 ? startTime : 0,
-                        maxBufferLength: 90,
-                        maxMaxBufferLength: 240,
-                        maxBufferSize: 60 * 1024 * 1024,
+                        maxBufferLength: 30,
+                        maxMaxBufferLength: 60,
+                        maxBufferSize: 16 * 1024 * 1024,
+                        maxBufferHole: 0.8,
+                        highBufferWatchdogPeriod: 3,
                         enableWorker: false,
                         progressive: true,
                         renderTextTracksNatively: false
@@ -15427,7 +15478,7 @@
                         if (autoPlayNextEnabled && isCurrentPlaybackSeries() && !nextEpAutoTriggered && !nextEpCancelledForThisEpisode) {
                             const cur = video ? (video.currentTime || 0) : 0;
                             const dur = getEffectiveVideoDuration();
-                            if (!dur || dur - cur <= 15.0) {
+                            if (dur > 60 && (dur - cur) <= 15.0) {
                                 if (!nextEpCountdownTimer) {
                                     startNextEpisodeCountdown(3);
                                 }
@@ -15436,7 +15487,7 @@
                     });
                     hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
                         if (data.fatal) {
-                            const resumePos = (video && video.currentTime > 5) ? video.currentTime : startTime;
+                            const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
                             if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsPlayer && (hlsPlayer._netRetries || 0) < 3) {
                                 hlsPlayer._netRetries = (hlsPlayer._netRetries || 0) + 1;
                                 console.warn(`[TMDB PLAYER] HLS Network Error recuperable (${hlsPlayer._netRetries}/3) en [${cleanName}], reanudando carga...`, data.details);
@@ -15451,7 +15502,7 @@
                                 hlsPlayer.recoverMediaError();
                                 return;
                             }
-                            console.warn(`[TMDB PLAYER] HLS Fatal en servidor [${cleanName}], pasando al siguiente...`, data);
+                            console.warn(`[TMDB PLAYER] HLS Fatal en servidor [${cleanName}], pasando al siguiente en pos ${resumePos.toFixed(1)}s...`, data);
                             executeTmdbDirectPlayback(serverIndex + 1, resumePos || 0);
                         }
                     });
@@ -15472,15 +15523,16 @@
             if (!isSoberanoTorrent) {
                 playbackWatchdog = setTimeout(() => {
                     if (video.readyState === 0 && serverMode === 'native') {
+                        const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
                         if (directServersQueue.length > (serverIndex + 1)) {
-                            console.warn(`[TMDB PLAYER] Watchdog activado para [${cleanName}], pasando al siguiente servidor (${serverIndex + 2}/${directServersQueue.length})...`);
-                            executeTmdbDirectPlayback(serverIndex + 1, startTime || video.currentTime || 0);
+                            console.warn(`[TMDB PLAYER] Watchdog activado para [${cleanName}], pasando al siguiente servidor (${serverIndex + 2}/${directServersQueue.length}) en pos ${resumePos.toFixed(1)}s...`);
+                            executeTmdbDirectPlayback(serverIndex + 1, resumePos);
                         } else if (currentTmdbPlaying && !currentTmdbPlaying.retriedFresh) {
-                            console.warn(`[TMDB PLAYER] Watchdog activado, agotados servidores, solicitando nuevos espejos...`);
-                            executeTmdbDirectPlayback(serverIndex + 1, startTime);
+                            console.warn(`[TMDB PLAYER] Watchdog activado, agotados servidores, solicitando nuevos espejos en pos ${resumePos.toFixed(1)}s...`);
+                            executeTmdbDirectPlayback(serverIndex + 1, resumePos);
                         }
                     }
-                }, 6000);
+                }, 12000);
             } else {
                 playbackWatchdog = setTimeout(() => {
                     if (video.readyState === 0 && serverMode === 'native') {

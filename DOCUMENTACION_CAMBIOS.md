@@ -319,7 +319,39 @@ Permite reproducir cualquier torrent P2P (incluso archivos `.mkv` 4K/10-bit HEVC
 
 ---
 
-## 12. Despliegue Rápido si Cambias de TV o Reinstalas Todo
+## 12. Blindaje Térmico contra Pausas y Reinicios a Mitad de Capítulo (HLS Zero-Drop Engine)
+
+### 📂 Archivos involucrados
+* [`app/index.html`](app/index.html) (`executeDirectPlayback`, `executeTmdbDirectPlayback`, configuración de `new Hls()`, listeners de `Hls.Events.ERROR` y `BUFFER_EOS`, `playbackWatchdog`, `triggerIframeFallback`)
+* [`service/service.js`](service/service.js) (`MAX_CACHE_BYTES`, `fetchSegmentBinary` con timeout elástico y reintento en caliente, `resolveJkStream` con bypass `fresh=1`)
+
+### 🎯 ¿Para qué sirve?
+Resuelve de raíz el fallo crítico reportado en televisor LG donde una serie en reproducción se detenía a mitad del episodio (minuto 3 a 10) y se reiniciaba bruscamente desde el segundo 0 (o saltaba a un reproductor web con publicidad).
+
+### ⚙️ ¿Cómo funciona?
+1. **Preservación Incondicional de Posición Temporal (`resumePos`):**
+   * Antes, si ocurría una fluctuación de red o error de decodificación, el manejador invocaba `executeDirectPlayback(serverIndex + 1, startTime)`. Como `startTime` solo guardaba el segundo inicial (`0`), cualquier reintento o alternancia de servidor enviaba al usuario al principio del video.
+   * Ahora, todas las capas de recuperación y failover extraen la posición real en tiempo real:
+     ```javascript
+     const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
+     executeDirectPlayback(serverIndex + 1, resumePos);
+     ```
+   * Si hay un cambio de servidor o reconexión, se retoma exactamente en el segundo donde iba el usuario.
+2. **Auto-Curación Multinivel en Hls.js (`startLoad` y `recoverMediaError`):**
+   * Anteriormente, cualquier error de fragmento se marcaba como `fatal: true` y provocaba la destrucción del reproductor nativo.
+   * Ahora, el motor Hls.js aplica la disciplina recomendada de recuperación por hardware:
+     * **`Hls.ErrorTypes.NETWORK_ERROR`:** Realiza hasta 3 reintentos progresivos con `hlsPlayer.startLoad(resumePos)` sin desmontar el búfer ni reiniciar la reproducción.
+     * **`Hls.ErrorTypes.MEDIA_ERROR`:** Ejecuta `hlsPlayer.recoverMediaError()` para sortear desfases de códec o micro-huecos en los contenedores TS sin reiniciar el elemento de video.
+3. **Dimensionamiento Térmico de Búfer para el Silicio de la TV (Apple TV / webOS):**
+   * Se ajustó el búfer de `new Hls()` en el navegador de 60 MB / 240 s (que asfixiaba los 1 GB de RAM del procesador Realtek) a un tamaño óptimo y seguro de **16 MB / 30-60 s** con `startPosition: startTime > 0 ? startTime : -1`.
+   * En el demonio Node.js de la TV (`service.js`), la memoria máxima de caché de fragmentos se acotó a **25 MB** (liberando más de 20 MB de memoria de sistema en webOS).
+4. **Timeouts Elásticos y Reintentos en el Proxy de Segmentos:**
+   * En `service/service.js`, `fetchSegmentBinary` elevó su tiempo de espera de 7 a **12 segundos** e implementó un reintento automático por socket fresco ante micro-cortes de Wi-Fi antes de retornar error 502.
+   * Si todos los servidores directos agotaran sus enlaces por caducidad de tokens CDN, el reproductor consulta automáticamente `/api/stream_info?...&fresh=1` para regenerar los tokens sin degradar la sesión al iframe.
+
+---
+
+## 13. Despliegue Rápido si Cambias de TV o Reinstalas Todo
 
 1. **En la Mac (Demonio P2P puerto `9097`):**
    ```bash
