@@ -265,7 +265,7 @@ const CATALOG_CACHE = new Map(); // max 60 entries
 const SEARCH_CACHE = new Map();  // max 40 entries
 const ANIME_CACHE = new Map();   // max 100 entries
 
-async function fetchJson(targetUrl, customHeaders = {}, timeoutMs = 6500) {
+async function fetchJson(targetUrl, customHeaders = {}, timeoutMs = 7500) {
     const raw = await fetchText(targetUrl, customHeaders, timeoutMs);
     try {
         return JSON.parse(raw);
@@ -274,7 +274,19 @@ async function fetchJson(targetUrl, customHeaders = {}, timeoutMs = 6500) {
     }
 }
 
-function fetchText(targetUrl, customHeaders = {}, timeoutMs = 4500) {
+function fetchText(targetUrl, customHeaders = {}, timeoutMs = 7500) {
+    const useRelay = (targetUrl.startsWith('https://jkanime.net/') || targetUrl.startsWith('https://torrentio.strem.fun/')) &&
+                     (!customHeaders || Object.keys(customHeaders).length === 0);
+    if (useRelay && ACTIVE_ALIGNER_HOST) {
+        return fetchViaMacRelay(targetUrl, Math.min(timeoutMs, 4000)).then(relayed => {
+            if (relayed && relayed.length > 10) return relayed;
+            return fetchTextDirect(targetUrl, customHeaders, timeoutMs);
+        });
+    }
+    return fetchTextDirect(targetUrl, customHeaders, timeoutMs);
+}
+
+function fetchTextDirect(targetUrl, customHeaders = {}, timeoutMs = 7500) {
     return new Promise((resolve, reject) => {
         let settled = false;
         let req = null;
@@ -293,7 +305,6 @@ function fetchText(targetUrl, customHeaders = {}, timeoutMs = 4500) {
                 port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
                 path: parsed.path,
                 method: 'GET',
-                family: 4,
                 headers: Object.assign({}, HEADERS, customHeaders),
                 timeout: timeoutMs
             };
@@ -308,7 +319,7 @@ function fetchText(targetUrl, customHeaders = {}, timeoutMs = 4500) {
                     }
                     if (!settled) {
                         settled = true;
-                        fetchText(redirectUrl, customHeaders, timeoutMs).then(resolve).catch(reject);
+                        fetchTextDirect(redirectUrl, customHeaders, timeoutMs).then(resolve).catch(reject);
                     }
                     return;
                 }
@@ -679,7 +690,6 @@ function fetchHttpsJsonRaw(hostname, fullPath, timeoutMs = 3800) {
             port: 443,
             path: fullPath,
             method: 'GET',
-            family: 4,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
                 'Accept': 'application/json'
@@ -2110,10 +2120,10 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
             new Promise(res => setTimeout(() => res([]), ms))
         ]);
         const triResults = await safeAll([
-            withTimeout(resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang), 7500),
-            withTimeout(resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang), 7500),
-            withTimeout(resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto), 7500),
-            withTimeout(resolveTmdbTorrents(id, type, s, e, reqHost, reqProto, preferSpanish), 7500)
+            withTimeout(resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang), 9500),
+            withTimeout(resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang), 9500),
+            withTimeout(resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto), 9500),
+            withTimeout(resolveTmdbTorrents(id, type, s, e, reqHost, reqProto, preferSpanish), 9500)
         ]);
 
         const framexCands = triResults[2] || [];
