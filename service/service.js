@@ -729,7 +729,10 @@ function convertSrtToWebVtt(rawSub) {
     let vtt = String(rawSub).replace(/^\uFEFF/, '').replace(/\r/g, '');
     vtt = vtt.replace(/\[\s*(?:cite|cita)\s*[:：]?\s*\d+\s*\]/gi, '')
              .replace(/\b(?:cite|cita)\s*[:：]?\s*\d+\b/gi, '')
-             .replace(/\{\\[^}]*\}/g, '');
+             .replace(/\{\\[^}]*\}/g, '')
+             .replace(/\\N/g, '\n')
+             .replace(/\\h/g, ' ')
+             .replace(/^\s*m\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+[lbspc]\s+[0-9.\s-]+$/gm, '');
     vtt = vtt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
              .replace(/(\d{2}:\d{2}),(\d{3})/g, '$1.$2');
     if (!/^\s*WEBVTT/i.test(vtt)) {
@@ -789,21 +792,38 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
     let tmdbId = /^\d+$/.test(rawId) ? rawId : "";
     let imdbId = rawId.startsWith("tt") ? rawId : (String(params.imdb_id || "").startsWith("tt") ? String(params.imdb_id).trim() : "");
     let type = (params.type === "movie" || params.type === "tv") ? params.type : (params.s || params.season || params.e || params.episode ? "tv" : "movie");
-    const s = parseInt(params.s || params.season || 1, 10) || 1;
+    let s = parseInt(params.s || params.season || 1, 10) || 1;
     const e = parseInt(params.e || params.episode || 1, 10) || 1;
     const title = String(params.title || "").trim();
     const slug = String(params.slug || "").trim();
     const requestedTrack = Math.max(0, parseInt(params.track || 0, 10) || 0);
     const reqTorrentHash = String(params.hash || params.infoHash || "").toLowerCase().trim();
 
+    // Normalizar años en 'season' (ej. s=2026) e inferir número de temporada explícito desde title/slug ("2nd Season", "Season 2", "Temporada 2", "II")
+    if (s > 100) s = 1;
+    if (s === 1 && (title || slug)) {
+        const combinedMeta = `${title} ${slug.replace(/-/g, " ")}`;
+        const mOrd = combinedMeta.match(/\b(\d+)\s*(?:st|nd|rd|th)\s*season\b/i);
+        const mCard = combinedMeta.match(/\b(?:season|temporada)\s*0*(\d+)\b/i);
+        const mRoman = combinedMeta.match(/\b(ii|iii|iv|v|vi)\s*$/i);
+        if (mOrd && mOrd[1]) {
+            s = parseInt(mOrd[1], 10) || 1;
+        } else if (mCard && mCard[1]) {
+            s = parseInt(mCard[1], 10) || 1;
+        } else if (mRoman && mRoman[1]) {
+            const rMap = { ii: 2, iii: 3, iv: 4, v: 5, vi: 6 };
+            s = rMap[mRoman[1].toLowerCase()] || 1;
+        }
+    }
+
     // 0A. PRIORIDAD SUPREMA EN TORRENTS MKV: Si el torrent activo tiene subtítulos oficiales en español embebidos en el MKV,
     // extraerlos directamente del flujo demuxed del Mac M3 Daemon para garantizar 100% de exactitud de episodio y sincronía al milisegundo.
     if (reqTorrentHash && /^[a-f0-9]{40}$/.test(reqTorrentHash) && requestedTrack === 0) {
         try {
             const liveDaemonHost = await getLiveAlignerHost();
-            const embSubRes = await fetchJson(`http://${liveDaemonHost}:9097/api/torrent/subtitles?hash=${encodeURIComponent(reqTorrentHash)}`, {}, 5000);
-            if (embSubRes && embSubRes.status === "ok" && embSubRes.has_embedded_es && embSubRes.vtt_content && embSubRes.vtt_content.indexOf("-->") !== -1) {
-                let hlsReadyVtt = convertSrtToWebVtt(embSubRes.vtt_content);
+            const embSubRes = await fetchJson(`http://${liveDaemonHost}:9097/api/torrent/subtitles?hash=${encodeURIComponent(reqTorrentHash)}`, {}, 9500);
+            if (embSubRes && embSubRes.status === "ok" && embSubRes.has_embedded_es && (embSubRes.is_growing || (embSubRes.vtt_content && embSubRes.vtt_content.indexOf("-->") !== -1))) {
+                let hlsReadyVtt = convertSrtToWebVtt(embSubRes.vtt_content || "WEBVTT\n\n");
                 if (!hlsReadyVtt.includes("X-TIMESTAMP-MAP")) {
                     hlsReadyVtt = hlsReadyVtt.replace(/^WEBVTT[^\n]*\n/, "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n");
                 }
@@ -820,12 +840,15 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                     tmdb_id: tmdbId,
                     imdb_id: imdbId,
                     selected_index: 0,
-                    total_tracks: 1,
+                    total_tracks: 2,
                     label: embLabel,
                     is_growing_embedded: !!embSubRes.is_growing,
                     vtt_url: embVttUrl,
                     vtt_content: hlsReadyVtt,
-                    tracks: [{ index: 0, label: embLabel, url: embVttUrl }]
+                    tracks: [
+                        { index: 0, label: embLabel, url: embVttUrl },
+                        { index: 1, label: "OpenSubtitles Español (Alternativo)", url: embVttUrl }
+                    ]
                 };
             }
         } catch (eEmb) {
@@ -877,7 +900,13 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
     // 2. Si no tenemos ni tmdbId ni imdbId, buscar en TMDB por título
     if (!tmdbId && !imdbId && title) {
         try {
-            const cleanTitle = title.replace(/\b(?:season|temporada|part|parte)\s*\d+/gi, "").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ]/g, " ").trim();
+            const cleanTitle = title
+                .replace(/\b\d+\s*(?:st|nd|rd|th)\s*season\b/gi, "")
+                .replace(/\b(?:season|temporada|part|parte|cour)\s*\d+/gi, "")
+                .replace(/\b(ii|iii|iv|v|vi)\s*$/i, "")
+                .replace(/[^\w\sáéíóúñÁÉÍÓÚÑ]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
             const searchPath = type === "movie" ? "search/movie" : "search/tv";
             const sRes = await proxyTmdbRequest(searchPath, `query=${encodeURIComponent(cleanTitle)}&language=es-MX`);
             const sJson = JSON.parse(sRes.body || "{}");
@@ -1627,16 +1656,23 @@ async function resolveCuevanaStreams(id, type, s, e, titles, yearTarget, origLan
 
 function getStreamDeduplicationKey(url) {
     if (!url) return '';
-    try {
-        var u = new URL(url);
-        var innerUrl = u.searchParams.get('url');
-        if (innerUrl) {
-            return innerUrl.split('?')[0];
-        }
-        return u.origin + u.pathname;
-    } catch(e) {
-        return url.split('?')[0];
+    var mHash = String(url).match(/[?&]hash=([a-f0-9]{40})/i);
+    if (mHash && mHash[1]) {
+        return 'torrent:' + mHash[1].toLowerCase();
     }
+    var mInner = String(url).match(/[?&]url=([^&]+)/i);
+    if (mInner && mInner[1]) {
+        try {
+            return decodeURIComponent(mInner[1]).split('?')[0];
+        } catch (eDec) {}
+    }
+    try {
+        var parsedU = url.parse(String(url), true);
+        if (parsedU && parsedU.host && parsedU.pathname) {
+            return (parsedU.protocol || 'http:') + '//' + parsedU.host + parsedU.pathname;
+        }
+    } catch(e) {}
+    return String(url).split('?')[0];
 }
 
 function deduplicateAndRankStreams(candidates, origLang, sharedEsSub, sharedAllSubs, preferSpanish = false) {
@@ -1863,6 +1899,18 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http', p
         const cands = [];
         for (const str of tData.streams) {
             const rawLines = `${str.name || ''}\n${str.title || ''}`.split('\n');
+            const firstTitleLine = (str.title || '').split('\n')[0] || '';
+            // Anti-Colisión de Temporada/Episodio: Si el archivo tiene explícitamente Cap.208 o S01E08 cuando pedimos S02E08, descartarlo
+            if (type === 'tv') {
+                const reqS = parseInt(s, 10) || 1;
+                const reqE = parseInt(e, 10) || 1;
+                const capM = firstTitleLine.match(/\bCap\.?\s*(\d{3,4})\b/i);
+                if (capM) {
+                    const capNum = parseInt(capM[1], 10);
+                    const expectedCap = reqS * 100 + reqE;
+                    if (capNum !== expectedCap && capNum !== reqE) continue;
+                }
+            }
             // Excluir líneas de banderas de subtítulos múltiples (ej. "Multi Subs / 🇷🇺 / 🇮🇹 / 🇪🇸 / 🇲🇽")
             // para jamás confundir subtítulos embebidos con audio doblado al español.
             const audioEvalLines = rawLines.filter(ln => {
@@ -1912,11 +1960,11 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http', p
                     sub_es: null,
                     subtitles: [],
                     seeds: seeds,
-                    base_bonus: isSpanish ? (300 + Math.min(seeds * 2, 200)) : ((hasMultiSubTag ? 90 : 40) + Math.min(seeds * 2, 160))
+                    base_bonus: isSpanish ? (450 + Math.min(seeds * 4, 250)) : ((hasMultiSubTag ? 320 : 40) + Math.min(seeds * 3, 180))
                 });
             }
         }
-        cands.sort((a, b) => b.seeds - a.seeds);
+        cands.sort((a, b) => (b.base_bonus - a.base_bonus) || (b.seeds - a.seeds));
         return cands;
     } catch(err) {
         console.warn(`[TORRENT_FEDERATOR] Error para ${id} (${type} S${s}E${e}):`, err.message);
@@ -2875,6 +2923,28 @@ const server = http.createServer(async (req, res) => {
             remote_access: publicUrl ? `${publicUrl}/ipad` : null,
             device: 'LG_webOS_SmartTV_OnDevice'
         }));
+    }
+
+    // Local Hls.js Bundle (Zero-CDN Latency & Offline Resilience for webOS)
+    if (parsed.pathname === '/vendor/hls.min.js') {
+        const hlsCandidates = [
+            path.join(__dirname, 'hls.min.js'),
+            '/media/developer/temp/hls.min.js'
+        ];
+        for (let i = 0; i < hlsCandidates.length; i++) {
+            if (fs.existsSync(hlsCandidates[i])) {
+                const jsBuf = fs.readFileSync(hlsCandidates[i]);
+                res.writeHead(200, {
+                    'Content-Type': 'application/javascript; charset=utf-8',
+                    'Cache-Control': 'public, max-age=86400',
+                    'Access-Control-Allow-Origin': '*',
+                    'Content-Length': jsBuf.length
+                });
+                return res.end(jsBuf);
+            }
+        }
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        return res.end('hls.min.js not found');
     }
 
     // Web UI Presentation

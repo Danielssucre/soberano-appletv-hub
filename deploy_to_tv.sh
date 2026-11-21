@@ -33,6 +33,7 @@ cp "$REPO_DIR/app/index.html" "$STAGE/app/ipad_vault.html"
 cp "$REPO_DIR/service/package.json" "$STAGE/service/"
 cp "$REPO_DIR/service/services.json" "$STAGE/service/"
 [ -f "$REPO_DIR/service/aligner.json" ] && cp "$REPO_DIR/service/aligner.json" "$STAGE/service/"
+[ -f "$REPO_DIR/service/hls.min.js" ] && cp "$REPO_DIR/service/hls.min.js" "$STAGE/service/"
 cp "$REPO_DIR/service/service.js" "$STAGE/service/"
 cp "$REPO_DIR/app/index.html" "$STAGE/service/ipad_vault.html"
 
@@ -139,6 +140,7 @@ ares-install -d tv "$IPK_FILE"
 echo "==> Sincronizando copia en /media/developer/temp/..."
 scp -o StrictHostKeyChecking=no -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -P "$TV_PORT" -i "$SSH_KEY" "$REPO_DIR/app/index.html" "prisoner@$TV_IP:/media/developer/temp/ipad_vault.html"
 scp -o StrictHostKeyChecking=no -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -P "$TV_PORT" -i "$SSH_KEY" "$REPO_DIR/service/service.js" "prisoner@$TV_IP:/media/developer/temp/server.js"
+[ -f "$REPO_DIR/service/hls.min.js" ] && scp -o StrictHostKeyChecking=no -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedKeyTypes=+ssh-rsa -P "$TV_PORT" -i "$SSH_KEY" "$REPO_DIR/service/hls.min.js" "prisoner@$TV_IP:/media/developer/temp/hls.min.js" || true
 
 echo "==> Relanzando Soberano Hub en LG TV..."
 ares-launch -d tv --close com.soberano.appletvhub >/dev/null 2>&1 || true
