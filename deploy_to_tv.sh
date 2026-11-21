@@ -4,6 +4,17 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 TV_PORT="9922"
 SSH_KEY="$HOME/.ssh/tv_webos"
 
+echo "==> Ejecutando Guard de Sintaxis y Compatibilidad Node 8.12..."
+/opt/homebrew/bin/node --check "$REPO_DIR/service/service.js"
+/opt/homebrew/bin/node -e '
+const fs = require("fs");
+const svc = fs.readFileSync("'"$REPO_DIR"'/service/service.js", "utf8");
+if (/\bnew\s+URL\s*\(/.test(svc)) { console.error("FATAL: service.js usa new URL() incompatible con Node 8.12"); process.exit(1); }
+const html = fs.readFileSync("'"$REPO_DIR"'/app/index.html", "utf8");
+[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].forEach(m => { if (m[1].trim()) new Function(m[1]); });
+console.log("==> Guard pre-despliegue OK.");
+'
+
 # Auto-detect TV IP from ARP (LG Electronics MAC 58:fd:b1) or ares-setup-device
 TV_IP=$(arp -a | grep -i "58:fd:b1" | sed -n 's/.*(\([0-9.]*\)).*/\1/p' | head -n 1)
 if [ -z "$TV_IP" ]; then

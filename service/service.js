@@ -553,9 +553,10 @@ async function searchAnimes(query) {
     }
 }
 
+let MAC_RELAY_DOWN_UNTIL = 0;
 function fetchViaMacRelay(targetUrl, timeoutMs = 2800) {
     return new Promise((resolve) => {
-        if (!ACTIVE_ALIGNER_HOST) return resolve(null);
+        if (!ACTIVE_ALIGNER_HOST || Date.now() < MAC_RELAY_DOWN_UNTIL) return resolve(null);
         const relayPath = `/api/fast_fetch?url=${encodeURIComponent(targetUrl)}`;
         let done = false;
         let req = null;
@@ -570,7 +571,11 @@ function fetchViaMacRelay(targetUrl, timeoutMs = 2800) {
                 res.on('data', c => { body += c; });
                 res.on('end', () => { clearTimeout(t); if (!done) { done = true; resolve(body); } });
             });
-            req.on('error', () => { clearTimeout(t); if (!done) { done = true; resolve(null); } });
+            req.on('error', () => {
+                MAC_RELAY_DOWN_UNTIL = Date.now() + 10000;
+                clearTimeout(t);
+                if (!done) { done = true; resolve(null); }
+            });
         } catch (e) {
             clearTimeout(t);
             if (!done) { done = true; resolve(null); }
@@ -776,9 +781,9 @@ const TMDB_STREAM_CACHE = new Map();
 // ==============================================================================
 let ALIGNER_CFG = {};
 try { ALIGNER_CFG = JSON.parse(fs.readFileSync(path.join(__dirname, 'aligner.json'), 'utf8')); } catch (e0) {}
-let ACTIVE_ALIGNER_HOST = process.env.ALIGNER_HOST || ALIGNER_CFG.host || '192.168.128.4';
+let ACTIVE_ALIGNER_HOST = process.env.ALIGNER_HOST || ALIGNER_CFG.host || '192.168.128.2';
 const ALIGNER_PORT = parseInt(process.env.ALIGNER_PORT || ALIGNER_CFG.port || 9098, 10);
-const ALIGNER_CANDIDATES = ['192.168.128.4', '192.168.128.5', '192.168.128.2', '192.168.128.3'];
+const ALIGNER_CANDIDATES = ['192.168.128.2', '192.168.128.3', '192.168.128.4', '192.168.128.5'];
 
 function probeAlignerHost(host, timeoutMs = 500) {
     return new Promise(resolve => {
@@ -2672,7 +2677,7 @@ async function getSoberanoTorrentStreams(id, type = 'movie', s = 1, e = 1) {
     ];
 
     try {
-        const responses = await safeAll(endpoints.map(u => fetchJson(u, { 'User-Agent': 'Mozilla/5.0' }, 6500)));
+        const responses = await safeAll(endpoints.map(u => fetchJson(u, {}, 7500)));
         const seenHashes = new Set();
         const combinedStreams = [];
 
@@ -2698,6 +2703,7 @@ async function getSoberanoTorrentStreams(id, type = 'movie', s = 1, e = 1) {
         });
 
         const out = {
+            status: 'ok',
             imdb_id: imdbId,
             stream_id: streamId,
             type: isTv ? 'tv' : 'movie',
