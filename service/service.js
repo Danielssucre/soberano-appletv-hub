@@ -2266,26 +2266,149 @@ function parseTorrentStream(stream) {
     };
 }
 
-async function searchSoberanoCatalog(query) {
+async function searchOpenP2PIndexers(query, category = 'all') {
     const qTrim = String(query || '').trim();
     if (!qTrim) return [];
+    const enc = encodeURIComponent(qTrim);
+    const out = [];
+    const seenHashes = new Set();
 
-    const cacheKey = `sob_q_${qTrim.toLowerCase()}`;
+    // Determinar categoría apibay (0=Todo, 200=Video, 207=HD Movies, 208=HD TV, 600=Other/Courses)
+    const tasks = category === 'course'
+        ? [
+            fetchJson(`https://apibay.org/q.php?q=${enc}&cat=600`, {}, 4500).catch(() => []),
+            fetchJson(`https://apibay.org/q.php?q=${encodeURIComponent(qTrim + ' course')}&cat=0`, {}, 4500).catch(() => []),
+            fetchJson(`https://apibay.org/q.php?q=${encodeURIComponent(qTrim + ' udemy')}&cat=0`, {}, 4500).catch(() => [])
+          ]
+        : (category === 'movie'
+            ? ['207', '201']
+            : (category === 'tv' ? ['208', '205'] : ['0'])
+          ).map(cat => fetchJson(`https://apibay.org/q.php?q=${enc}&cat=${cat}`, {}, 4500).catch(() => []));
+
+    if (category === 'all' || category === 'anime') {
+        tasks.push(
+            fetchText(`https://nyaa.si/?page=rss&q=${enc}&c=1_0&f=0`, {}, 4500).catch(() => '')
+        );
+    }
+
+    const resArr = await Promise.all(tasks);
+    for (let i = 0; i < resArr.length; i++) {
+        const item = resArr[i];
+        if (Array.isArray(item)) {
+            for (const row of item) {
+                if (!row || !row.info_hash || row.info_hash === '0000000000000000000000000000000000000000') continue;
+                const h = String(row.info_hash).toLowerCase();
+                const seeds = parseInt(row.seeders || '0', 10) || 0;
+                if (seeds < 1 || seenHashes.has(h)) continue;
+                const title = String(row.name || '').trim();
+                const tLow = title.toLowerCase();
+                const catCode = String(row.category || '');
+                if (category === 'course' && ['201', '202', '205', '207', '208'].includes(catCode) && !/\b(course|curso|udemy|coursera|platzi|masterclass|bootcamp|tutorial|training|packt)\b/i.test(tLow)) {
+                    continue;
+                }
+                if (category === 'documentary' && !/\b(doc|documentary|documental|bbc|natgeo|national geographic|netflix|nova|history|discovery|planet|cosmos|attenborough)\b/i.test(tLow)) {
+                    // Si es búsqueda de documental en indexador general, priorizar los que coinciden
+                    if (catCode !== '205' && catCode !== '208') continue;
+                }
+                seenHashes.add(h);
+                let catLabel = 'Torrent P2P';
+                if (category === 'course' || /\b(course|curso|udemy|coursera|platzi|masterclass|bootcamp|tutorial|training|e-learning|edureka|pluralsight)\b/i.test(tLow) || catCode.startsWith('6')) {
+                    catLabel = 'Curso';
+                } else if (category === 'documentary' || /\b(documentary|documental|natgeo|bbc|discovery)\b/i.test(tLow)) {
+                    catLabel = 'Documental';
+                } else if (catCode === '207' || catCode === '201') {
+                    catLabel = 'Película';
+                } else if (catCode === '208' || catCode === '205') {
+                    catLabel = 'Serie';
+                }
+                out.push({
+                    id: h,
+                    imdb_id: row.imdb || null,
+                    infoHash: h,
+                    source: 'direct_p2p',
+                    direct_p2p: true,
+                    type: (catCode === '208' || catCode === '205') ? 'tv' : 'movie',
+                    categoryLabel: catLabel,
+                    title,
+                    seeds,
+                    sizeBytes: parseInt(row.size || '0', 10) || 0,
+                    numFiles: parseInt(row.num_files || '1', 10) || 1,
+                    poster: '',
+                    backdrop: '',
+                    year: '',
+                    description: `${catLabel} • ${seeds} seeds • ${( (parseInt(row.size || '0', 10) || 0) / (1024*1024*1024) ).toFixed(2)} GB`
+                });
+            }
+        } else if (typeof item === 'string' && item.includes('<item>')) {
+            const blocks = item.split('<item>').slice(1, 18);
+            for (const b of blocks) {
+                const tm = b.match(/<title>([\s\S]*?)<\/title>/);
+                const hm = b.match(/<nyaa:infoHash>([a-f0-9]{40})<\/nyaa:infoHash>/i);
+                const sm = b.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/);
+                const szm = b.match(/<nyaa:size>([^<]+)<\/nyaa:size>/);
+                if (!tm || !hm) continue;
+                const h = hm[1].toLowerCase();
+                const seeds = sm ? parseInt(sm[1], 10) : 0;
+                if (seeds < 1 || seenHashes.has(h)) continue;
+                seenHashes.add(h);
+                const title = tm[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+                out.push({
+                    id: h,
+                    imdb_id: null,
+                    infoHash: h,
+                    source: 'direct_p2p',
+                    direct_p2p: true,
+                    type: 'tv',
+                    categoryLabel: 'Anime',
+                    title,
+                    seeds,
+                    sizeBytes: 0,
+                    sizeLabel: szm ? szm[1].trim() : '',
+                    numFiles: 1,
+                    poster: '',
+                    backdrop: '',
+                    year: '',
+                    description: `Anime P2P • ${seeds} seeds${szm ? ' • ' + szm[1].trim() : ''}`
+                });
+            }
+        }
+    }
+    out.sort((a, b) => (b.seeds || 0) - (a.seeds || 0));
+    return out.slice(0, 30);
+}
+
+async function searchSoberanoCatalog(query, category = 'all') {
+    const qTrim = String(query || '').trim();
+    const catNorm = String(category || 'all').toLowerCase();
+    if (!qTrim) return [];
+
+    const cacheKey = `sob_q_${catNorm}_${qTrim.toLowerCase()}`;
     if (SOBERANO_CACHE.has(cacheKey)) {
         return SOBERANO_CACHE.get(cacheKey);
     }
 
+    // Si el usuario busca Cursos, consultar directamente indexadores P2P abiertos (cursos no existen en TMDB)
+    if (catNorm === 'course') {
+        const courseRes = await searchOpenP2PIndexers(qTrim, 'course');
+        SOBERANO_CACHE.set(cacheKey, courseRes);
+        return courseRes;
+    }
+
     const enc = encodeURIComponent(qTrim);
-    // Búsqueda Híbrida Inteligente: Cinemeta + TMDB Multi-Search con resolución de IMDb IDs
-    const endpoints = [
-        `https://v3-cinemeta.strem.io/catalog/movie/top/search=${enc}.json`,
-        `https://v3-cinemeta.strem.io/catalog/series/top/search=${enc}.json`
-    ];
+    // Búsqueda Híbrida Inteligente: Cinemeta + TMDB Multi-Search + Indexadores P2P Abiertos
+    const endpoints = [];
+    if (catNorm === 'all' || catNorm === 'movie' || catNorm === 'documentary') {
+        endpoints.push(`https://v3-cinemeta.strem.io/catalog/movie/top/search=${enc}.json`);
+    }
+    if (catNorm === 'all' || catNorm === 'tv' || catNorm === 'anime' || catNorm === 'documentary') {
+        endpoints.push(`https://v3-cinemeta.strem.io/catalog/series/top/search=${enc}.json`);
+    }
 
     try {
-        const [metaResults, tmdbRaw] = await Promise.all([
-            safeAll(endpoints.map(u => fetchJson(u, {}, 5000))),
-            proxyTmdbRequest('search/multi', `query=${enc}&language=es-MX`).then(r => JSON.parse(r.body)).catch(() => null)
+        const [metaResults, tmdbRaw, p2pDirect] = await Promise.all([
+            safeAll(endpoints.map(u => fetchJson(u, {}, 4500))),
+            proxyTmdbRequest('search/multi', `query=${enc}&language=es-MX`).then(r => JSON.parse(r.body)).catch(() => null),
+            searchOpenP2PIndexers(qTrim, catNorm)
         ]);
         const results = metaResults;
         const combined = [];
@@ -2295,11 +2418,15 @@ async function searchSoberanoCatalog(query) {
             if (res && Array.isArray(res.metas)) {
                 res.metas.forEach(m => {
                     if (m && m.id && !seenIds.has(m.id)) {
+                        const genres = Array.isArray(m.genres) ? m.genres.map(g => String(g).toLowerCase()) : [];
+                        if (catNorm === 'documentary' && !genres.some(g => g.includes('doc'))) return;
+                        if (catNorm === 'anime' && !genres.some(g => g.includes('anim'))) return;
                         seenIds.add(m.id);
                         combined.push({
                             id: m.id,
                             imdb_id: m.imdb_id || m.id,
                             type: m.type === 'series' ? 'tv' : 'movie',
+                            categoryLabel: catNorm === 'documentary' ? 'Documental' : (m.type === 'series' ? 'Serie' : 'Película'),
                             title: m.name,
                             poster: m.poster,
                             backdrop: m.background,
@@ -2312,9 +2439,17 @@ async function searchSoberanoCatalog(query) {
             }
         });
 
-        // Inyectar resultados de alta relevancia de TMDB (especialmente series de televisión)
+        // Inyectar resultados de alta relevancia de TMDB (especialmente series, documentales y anime)
         if (tmdbRaw && Array.isArray(tmdbRaw.results)) {
-            const tmdbItems = tmdbRaw.results.filter(it => (it.media_type === 'movie' || it.media_type === 'tv') && (it.poster_path || it.backdrop_path)).slice(0, 10);
+            const tmdbItems = tmdbRaw.results.filter(it => {
+                if (it.media_type !== 'movie' && it.media_type !== 'tv') return false;
+                if (!it.poster_path && !it.backdrop_path) return false;
+                if (catNorm === 'movie' && it.media_type !== 'movie') return false;
+                if (catNorm === 'tv' && it.media_type !== 'tv') return false;
+                if (catNorm === 'documentary' && !(Array.isArray(it.genre_ids) && it.genre_ids.includes(99))) return false;
+                if (catNorm === 'anime' && !(Array.isArray(it.genre_ids) && it.genre_ids.includes(16))) return false;
+                return true;
+            }).slice(0, 10);
             for (const tItem of tmdbItems) {
                 const isTv = tItem.media_type === 'tv';
                 let imdbId = null;
@@ -2327,23 +2462,28 @@ async function searchSoberanoCatalog(query) {
                 const canonicalId = imdbId || String(tItem.id);
                 if (!seenIds.has(canonicalId)) {
                     seenIds.add(canonicalId);
+                    const gIds = Array.isArray(tItem.genre_ids) ? tItem.genre_ids : [];
+                    let cLbl = isTv ? 'Serie' : 'Película';
+                    if (gIds.includes(99)) cLbl = 'Documental';
+                    else if (gIds.includes(16) && tItem.original_language === 'ja') cLbl = 'Anime';
                     combined.push({
                         id: canonicalId,
                         imdb_id: imdbId || canonicalId,
                         type: isTv ? 'tv' : 'movie',
+                        categoryLabel: cLbl,
                         title: tItem.title || tItem.name || '',
                         poster: tItem.poster_path ? (tItem.poster_path.startsWith('http') ? tItem.poster_path : `https://image.tmdb.org/t/p/w500${tItem.poster_path}`) : '',
                         backdrop: tItem.backdrop_path ? `https://image.tmdb.org/t/p/w1280${tItem.backdrop_path}` : '',
                         year: (tItem.release_date || tItem.first_air_date || '').substring(0, 4),
                         description: tItem.overview || '',
-                        genres: tItem.genre_ids || [],
+                        genres: gIds,
                         popularity: tItem.popularity || 0
                     });
                 }
             }
         }
 
-        // Ordenar con relevancia exacta: coincidencias exactas o de prefijo primero
+        // Ordenar fichas TMDB/Cinemeta por relevancia
         const qNorm = qTrim.toLowerCase();
         combined.sort((a, b) => {
             const aTitle = (a.title || '').toLowerCase();
@@ -2358,16 +2498,13 @@ async function searchSoberanoCatalog(query) {
             if (aStarts && !bStarts) return -1;
             if (!aStarts && bStarts) return 1;
 
-            // Preferir series sobre documentales o películas secundarias si coinciden
-            const aSeries = a.type === 'tv';
-            const bSeries = b.type === 'tv';
-            if (aSeries !== bSeries) return aSeries ? -1 : 1;
-
             return (b.popularity || 0) - (a.popularity || 0);
         });
 
-        SOBERANO_CACHE.set(cacheKey, combined);
-        return combined;
+        // Anexar resultados P2P directos (documentales sin TMDB, packs, anime RAW, cursos)
+        const finalMerged = combined.concat(Array.isArray(p2pDirect) ? p2pDirect : []);
+        SOBERANO_CACHE.set(cacheKey, finalMerged);
+        return finalMerged;
     } catch (e) {
         console.warn('[SOBERANO_CATALOG] Error:', e.message);
         return [];
@@ -2508,17 +2645,36 @@ const server = http.createServer(async (req, res) => {
     // 0. SOBERANO PHANTOM-SWARM TORRENT SEARCH & STREAM ENDPOINTS ($0.00 USD)
     if (parsed.pathname === '/api/soberano/search') {
         const q = parsed.query.q || parsed.query.query || '';
+        const cat = parsed.query.cat || 'all';
         try {
-            const results = await searchSoberanoCatalog(q);
+            const results = await searchSoberanoCatalog(q, cat);
             res.writeHead(200, {
                 'Content-Type': 'application/json; charset=utf-8',
                 'Cache-Control': 'public, max-age=1800',
                 'Access-Control-Allow-Origin': '*'
             });
-            return res.end(JSON.stringify({ status: 'ok', query: q, count: results.length, results: results }));
+            return res.end(JSON.stringify({ status: 'ok', query: q, category: cat, count: results.length, results: results }));
         } catch(eSob) {
             res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             return res.end(JSON.stringify({ status: 'error', message: eSob.message, results: [] }));
+        }
+    }
+
+    if (parsed.pathname === '/api/soberano/files') {
+        const infoHash = (parsed.query.hash || parsed.query.infoHash || '').toLowerCase().trim();
+        const name = parsed.query.name || 'torrent';
+        if (!infoHash) {
+            res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({ status: 'error', files: [] }));
+        }
+        try {
+            const liveDaemonHost = await getLiveAlignerHost();
+            const fData = await fetchJson(`http://${liveDaemonHost}:9097/api/torrent/files?hash=${encodeURIComponent(infoHash)}&name=${encodeURIComponent(name)}`, {}, 14000);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+            return res.end(JSON.stringify(fData || { status: 'error', files: [] }));
+        } catch (eFiles) {
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            return res.end(JSON.stringify({ status: 'error', message: eFiles.message, files: [] }));
         }
     }
 

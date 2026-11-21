@@ -43,11 +43,13 @@
                 --radius-md: 12px;
                 --tv-focus-glow: rgba(255, 255, 255, 0.45);
                 --tv-focus-border: #ffffff;
+                --safe-left: 48px;
+                --safe-right: 48px;
             }
 
             body {
-                padding-left: var(--tv-safe-pad-x) !important;
-                padding-right: var(--tv-safe-pad-x) !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
                 font-family: -apple-system, "SF Pro Display", "Outfit", Roboto, sans-serif !important;
                 text-rendering: optimizeLegibility;
                 -webkit-font-smoothing: antialiased;
@@ -65,14 +67,16 @@
 
             .nav-item {
                 font-size: 16px !important;
-                padding: 10px 24px !important;
-                border-radius: 24px !important;
+                padding: 10px 22px !important;
+                border-radius: 14px !important;
             }
 
             .hero-banner { 
                 height: 560px !important; 
                 border-radius: var(--radius-xl) !important;
             }
+            .hero-title { font-size: 54px !important; }
+            .shelf-title { font-size: 26px !important; }
             .tv-card { 
                 flex: 0 0 380px !important; 
                 border-radius: var(--radius-lg) !important;
@@ -82,9 +86,10 @@
                 border-radius: var(--radius-md) !important;
             }
             .card-title, .poster-title { 
-                font-size: 17px !important; 
+                font-size: 18px !important; 
                 font-weight: 600 !important;
             }
+            .card-meta { font-size: 14px !important; }
         }
 
         /* ========================================================
@@ -97,29 +102,58 @@
         }
 
         .shelf-track, .explore-grid, .catalog-grid, .genres-track {
-            contain: content !important;
-            will-change: scroll-position !important;
+            contain: layout style !important;
         }
 
-        /* Reemplazar blur costoso de CPU por fondo sólido oscuro translúcido */
+        .shelf-section {
+            content-visibility: auto;
+            contain-intrinsic-size: 0 360px;
+        }
+        .ep-row-card {
+            content-visibility: auto;
+            contain-intrinsic-size: 0 68px;
+        }
+
+        /* Reemplazar blur costoso de CPU por fondo sólido oscuro en webOS */
         header.appletv-header,
+        .header-nav,
+        .btn-apple-secondary,
         .tv-card,
+        .card-pill-tag,
         .tv-poster-card,
         .catalog-card,
         .shelf-arrow,
         .sheet-modal,
+        .sheet-close-btn,
+        .search-modal-backdrop,
         .search-box-wrap,
-        .player-bottom-controls,
-        .player-header-osd {
+        .soberano-search-field,
+        .toast-pill,
+        .mobile-tab-bar,
+        .quality-filter-bar,
+        .quality-badge,
+        .btn-close-player,
+        .btn-ctrl,
+        .next-ep-card,
+        .player-bottom-controls {
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
+        }
+        header.appletv-header,
+        .sheet-modal,
+        .search-box-wrap,
+        .player-bottom-controls {
             background: rgba(14, 18, 26, 0.96) !important;
+        }
+        .player-header-osd {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
         }
 
         .shelf-track, .explore-grid {
-            scroll-behavior: smooth;
             -webkit-overflow-scrolling: touch;
-            contain: content;
+            contain: layout style;
         }
 
         .nav-item, 
@@ -131,31 +165,23 @@
         button, 
         [tabindex="0"] {
             outline: none !important;
-            transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.12s cubic-bezier(0.2, 0, 0, 1) !important;
+            transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), opacity 0.12s ease-out !important;
             contain: layout paint;
         }
 
-        .tv-card:focus, 
-        .tv-poster-card:focus, 
-        .catalog-card:focus,
-        .ep-row-card:focus,
-        .btn-apple-primary:focus,
-        .btn-apple-secondary:focus,
-        .nav-item:focus, 
-        .hero-btn:focus,
-        /* Tarjetas de Contenido en Foco (Elevación 3D Apple TV sin solapamiento) */
+        /* Tarjetas de Contenido en Foco (tvOS Specular White) */
         .tv-card:focus, .tv-card.tv-focused,
         .catalog-card:focus, .catalog-card.tv-focused,
         .tv-poster-card:focus, .tv-poster-card.tv-focused {
             outline: none !important;
-            transform: translate3d(0, -6px, 0) scale3d(1.04, 1.04, 1) !important;
-            box-shadow: 0 0 0 3px #38bdf8, 0 12px 30px rgba(0, 0, 0, 0.9) !important;
+            transform: translate3d(0, -6px, 0) scale3d(1.05, 1.05, 1) !important;
+            box-shadow: 0 0 0 3px #ffffff, 0 14px 32px rgba(0, 0, 0, 0.9) !important;
             z-index: 30 !important;
-            border-color: #38bdf8 !important;
+            border-color: #ffffff !important;
             will-change: transform;
         }
 
-        /* Botones, Pestañas y Filas Minimalistas (CERO superposición, CERO distorsión) */
+        /* Botones, Pestañas y Filas Minimalistas (Feedback táctil limpio + Halo Specular White) */
         .season-tab:focus, .season-tab.tv-focused,
         .filter-pill:focus, .filter-pill.tv-focused,
         .type-pill:focus, .type-pill.tv-focused,
@@ -168,22 +194,37 @@
         .soberano-torrent-item:focus, .soberano-torrent-item.tv-focused,
         .sheet-close-btn:focus, .sheet-close-btn.tv-focused,
         .search-close-x:focus, .search-close-x.tv-focused,
+        #scrubberContainer:focus, #scrubberContainer.tv-focused,
         button:focus,
         .tv-focused {
             outline: none !important;
+            transform: scale3d(1.04, 1.04, 1) !important;
+            box-shadow: 0 0 0 3px #ffffff, 0 6px 20px rgba(0, 0, 0, 0.75) !important;
+            z-index: 15 !important;
+            border-color: #ffffff !important;
+            will-change: transform;
+        }
+
+        .ep-row-card:focus, .ep-row-card.tv-focused,
+        .soberano-torrent-item:focus, .soberano-torrent-item.tv-focused,
+        #scrubberContainer:focus, #scrubberContainer.tv-focused {
             transform: none !important;
-            box-shadow: 0 0 0 2.5px #38bdf8, 0 4px 16px rgba(56, 189, 248, 0.35) !important;
-            z-index: 5 !important;
-            border-color: #38bdf8 !important;
-            will-change: auto;
+            background: rgba(255, 255, 255, 0.14) !important;
         }
 
         .nav-item:focus, .nav-item.tv-focused {
-            transform: translate3d(0, -2px, 0) scale3d(1.06, 1.06, 1) !important;
+            transform: translate3d(0, -2px, 0) scale3d(1.05, 1.05, 1) !important;
             box-shadow: 0 0 0 3px #ffffff !important;
-            background: rgba(255, 255, 255, 0.25) !important;
-            color: #ffffff !important;
+            background: #ffffff !important;
+            color: #000000 !important;
             will-change: transform;
+        }
+
+        /* Ocultar botones exclusivos iOS/AirPlay en LG webOS TV */
+        body.webos-tv #btnAirPlay,
+        body.webos-tv #btnFullscreenIos,
+        body.webos-tv .quality-status-tag {
+            display: none !important;
         }
 
         ::-webkit-scrollbar {
@@ -2626,38 +2667,37 @@
         }
 
         /* 1. Neutralizar filtros caros de GPU (backdrop-filter y blur masivo) */
-        .appletv-header, .player-header-osd, .player-bottom-controls, 
-        .shelf-header, .modal-sheet, .search-modal-box {
+        .appletv-header, .player-bottom-controls, 
+        .shelf-header, .sheet-modal, .search-modal-backdrop, .search-box-wrap {
             -webkit-backdrop-filter: none !important;
             backdrop-filter: none !important;
-            background: #0f1218 !important;
         }
 
-        /* 2. Suprimir box-shadow pesados en tarjetas en reposo */
+        /* 2. Suprimir box-shadow pesados y will-change en tarjetas en reposo */
         .tv-card, .catalog-card, .genre-chip, .btn-ctrl, .nav-item {
             box-shadow: none !important;
-            will-change: transform !important;
-            contain: content !important;
+            contain: layout paint !important;
         }
 
         /* 3. Aceleración 3D pura en foco activo (tvOS 18 Specular White 60 FPS) */
         .tv-card.tv-focused, .catalog-card.tv-focused, .tv-card:focus, .catalog-card:focus,
         .tv-poster-card.tv-focused, .tv-poster-card:focus {
-            transform: translate3d(0, -6px, 0) scale3d(1.06, 1.06, 1) !important;
-            outline: 3px solid #ffffff !important;
-            outline-offset: 4px !important;
-            box-shadow: 0 16px 36px rgba(0,0,0,0.95), 0 0 16px rgba(255,255,255,0.4) !important;
-            z-index: 25 !important;
-            transition: transform 0.08s cubic-bezier(0.2, 0.9, 0.4, 1) !important;
+            transform: translate3d(0, -6px, 0) scale3d(1.05, 1.05, 1) !important;
+            outline: none !important;
+            box-shadow: 0 0 0 3px #ffffff, 0 14px 32px rgba(0,0,0,0.9) !important;
+            z-index: 30 !important;
+            will-change: transform;
+            transition: transform 0.1s cubic-bezier(0.2, 0.9, 0.4, 1) !important;
         }
 
         .genre-chip.tv-focused, .genre-chip:focus, .nav-item.tv-focused, .nav-item:focus {
-            transform: translate3d(0, -2px, 0) scale3d(1.06, 1.06, 1) !important;
+            transform: translate3d(0, -2px, 0) scale3d(1.05, 1.05, 1) !important;
             outline: none !important;
             box-shadow: 0 0 0 3px #ffffff, 0 8px 24px rgba(0, 0, 0, 0.7) !important;
             background: #ffffff !important;
             color: #000000 !important;
-            transition: transform 0.08s ease-out !important;
+            will-change: transform;
+            transition: transform 0.1s ease-out !important;
         }
 
         /* 4. Optimización de imágenes y desplazamiento */
@@ -2668,7 +2708,6 @@
 
         .card-img, .catalog-poster-img, .catalog-img {
             image-rendering: auto;
-            transform: translateZ(0);
         }
     
         /* ========================================================
@@ -2687,12 +2726,10 @@
             touch-action: pan-y pinch-zoom !important;
         }
 
-        /* Momentum scrolling & 120Hz ProMotion alignment */
+        /* Momentum scrolling & 120Hz ProMotion alignment (sin scroll-snap en webOS D-Pad) */
         .shelf-track, .explore-grid, .catalog-grid, .genres-track, .search-results-grid {
             -webkit-overflow-scrolling: touch !important;
-            scroll-behavior: smooth !important;
-            contain: layout style paint !important;
-            will-change: scroll-position !important;
+            contain: layout style !important;
         }
 
         /* Ocultar scrollbars en iOS touch pero mantener deslizamiento ultrasuave */
@@ -3842,16 +3879,15 @@
                 <svg viewBox="0 0 170 170">
                     <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.35.13-9.16-1.9-14.42-6.08-3.7-3.08-7.7-7.86-12-14.34-5.87-8.86-10.42-18.79-13.65-29.78-3.23-11-4.85-21.72-4.85-32.17 0-14.28 3.59-26.17 10.77-35.67 7.18-9.5 16.3-14.34 27.37-14.52 4.8 0 10.15 1.25 16.05 3.75 5.9 2.5 9.77 3.8 11.61 3.9 1.74 0 5.86-1.39 12.37-4.17 6.51-2.78 12.19-4.04 17.04-3.79 12.87.68 23.36 5.66 31.47 14.93-11.28 6.84-16.8 16.29-16.55 28.36.26 9.4 3.91 17.29 10.96 23.68 7.05 6.39 15.54 10.05 25.47 10.98-2.61 8.23-6.19 16.63-10.74 25.19zM119.22 31.84c0-7.72 2.76-14.88 8.28-21.49 5.53-6.61 12.38-10.35 20.57-11.22.25 1.01.38 1.95.38 2.83 0 7.73-2.88 15.08-8.63 22.06-5.75 6.98-12.82 10.87-21.21 11.66-.49-1.26-.74-2.28-.74-3.84z"/>
                 </svg>
-                <span>tvOS</span>
+                <span>Soberano TV</span>
             </div>
-            <span class="brand-pill">Soberano</span>
         </a>
 
         <nav class="header-nav">
             <button class="nav-item active" id="tabAnime" onclick="switchMediaTab('anime')"><i class="fa fa-torii-gate"></i> Anime</button>
             <button class="nav-item" id="tabMovies" onclick="switchMediaTab('movies')"><i class="fa fa-film"></i> Películas</button>
             <button class="nav-item" id="tabSeries" onclick="switchMediaTab('series')"><i class="fa fa-tv"></i> Series</button>
-            <button class="nav-item" id="tabSoberano" onclick="switchMediaTab('soberano')" style="background:rgba(217,70,239,0.15); border:1px solid rgba(217,70,239,0.35);"><i class="fa fa-infinity" style="color:#e879f9;"></i> Soberano</button>
+            <button class="nav-item" id="tabSoberano" onclick="switchMediaTab('soberano')"><i class="fa fa-bolt"></i> Torrents</button>
             <button class="nav-item" id="tabSearch" onclick="openSearchModal()"><i class="fa fa-search"></i> Buscar</button>
         </nav>
 
@@ -3881,8 +3917,8 @@
             <!-- 0. HERO SPOTLIGHT SHOWCASE (APPLE HIG BANNER) -->
             <section class="hero-container" id="heroShowcaseSection">
                 <div class="hero-banner">
-                    <img id="heroBackdropA" class="hero-backdrop top-shelf-layer active" src="" alt="Hero Backdrop A">
-                    <img id="heroBackdropB" class="hero-backdrop top-shelf-layer" src="" alt="Hero Backdrop B">
+                    <img id="heroBackdropA" class="hero-backdrop top-shelf-layer active" decoding="async" src="" alt="Hero Backdrop A">
+                    <img id="heroBackdropB" class="hero-backdrop top-shelf-layer" decoding="async" src="" alt="Hero Backdrop B">
                     <div class="hero-gradient-overlay"></div>
                     <div class="hero-content">
                         <div class="hero-tagline" id="heroTag"><span class="dot"></span> Colección Soberano • 4K HDR</div>
@@ -3958,20 +3994,17 @@
             <!-- SOBERANO CALIDAD & IDIOMA FILTER BAR -->
             <div class="quality-filter-bar">
                 <div class="quality-filter-left">
-                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtros:</span>
                     <button class="filter-pill active" id="filterMovieAll" tabindex="0" onclick="setQualityFilter('all')">
-                        <i class="fa fa-film"></i> Todo el Catálogo
+                        <i class="fa fa-film"></i> Todo
                     </button>
                     <button class="filter-pill" id="filterMovieHD" tabindex="0" onclick="setQualityFilter('hd')">
-                        <i class="fa fa-sparkles" style="color:#30d158;"></i> ✨ Solo 1080p Full HD
+                        <i class="fa fa-high-definition"></i> 1080p HD
                     </button>
                     <button class="filter-pill" id="filterMovieSpanish" tabindex="0" onclick="toggleSpanishLanguageFilter()">
-                        <i class="fa fa-language" style="color:#ff9f0a;"></i> 🇪🇸 Solo en Español
+                        <i class="fa fa-language"></i> Español
                     </button>
                 </div>
-                <div class="quality-filter-status" id="movieQualityStatus">
-                    <span class="quality-status-tag"><i class="fa fa-info-circle"></i> Mostrando todo (1080p HD + Estrenos Cine)</span>
-                </div>
+                <div class="quality-filter-status" id="movieQualityStatus"></div>
             </div>
 
             <!-- Fila 1: Tendencias Hoy -->
@@ -4081,20 +4114,17 @@
             <!-- SOBERANO CALIDAD & IDIOMA FILTER BAR -->
             <div class="quality-filter-bar">
                 <div class="quality-filter-left">
-                    <span class="quality-filter-title"><i class="fa fa-sliders"></i> Filtros:</span>
                     <button class="filter-pill active" id="filterSeriesAll" tabindex="0" onclick="setQualityFilter('all')">
-                        <i class="fa fa-tv"></i> Todo el Catálogo
+                        <i class="fa fa-tv"></i> Todo
                     </button>
                     <button class="filter-pill" id="filterSeriesHD" tabindex="0" onclick="setQualityFilter('hd')">
-                        <i class="fa fa-sparkles" style="color:#30d158;"></i> ✨ Solo 1080p Full HD
+                        <i class="fa fa-high-definition"></i> 1080p HD
                     </button>
                     <button class="filter-pill" id="filterSeriesSpanish" tabindex="0" onclick="toggleSpanishLanguageFilter()">
-                        <i class="fa fa-language" style="color:#ff9f0a;"></i> 🇪🇸 Solo en Español
+                        <i class="fa fa-language"></i> Español
                     </button>
                 </div>
-                <div class="quality-filter-status" id="seriesQualityStatus">
-                    <span class="quality-status-tag" style="background:rgba(48,209,88,0.2); color:#30d158; border:1px solid rgba(48,209,88,0.4);"><i class="fa fa-check-circle"></i> 100% de las series en transmisión digital 1080p HD</span>
-                </div>
+                <div class="quality-filter-status" id="seriesQualityStatus"></div>
             </div>
 
             <!-- Fila 1: Series en Tendencia -->
@@ -4157,23 +4187,16 @@
              4. VISTA: SOBERANO PHANTOM-SWARM (TORRENTS UNIVERSALES EN RAM)
              ======================================================== -->
         <div id="viewSoberano" style="display:none;">
-            <!-- Hero Buscador Universal Soberano -->
-            <section class="soberano-hero-search" style="padding: 30px 20px 20px; max-width: 900px; margin: 0 auto; text-align: center;">
-                <div style="display:inline-flex; align-items:center; gap:8px; padding:6px 14px; background:rgba(217,70,239,0.15); border:1px solid rgba(217,70,239,0.35); border-radius:30px; margin-bottom:14px;">
-                    <i class="fa fa-bolt" style="color:#e879f9; font-size:13px;"></i>
-                    <span style="font-size:12px; font-weight:700; color:#f0abfc; letter-spacing:0.5px; text-transform:uppercase;">Phantom-Swarm • Buffer RAM Secuencial (0 Disco)</span>
-                </div>
-                <h1 style="font-size:32px; font-weight:800; margin-bottom:10px; background:linear-gradient(135deg, #ffffff 40%, #e879f9 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">
+            <!-- Hero Buscador Universal Soberano (Minimalista 10-Foot) -->
+            <section class="soberano-hero-search" style="padding: 20px 20px 14px; max-width: 960px; margin: 0 auto; text-align: center;">
+                <h1 style="font-size:32px; font-weight:800; margin-bottom:14px; color:#ffffff; letter-spacing:-0.5px;">
                     Buscador Universal de Torrents
                 </h1>
-                <p style="color:var(--text-muted); font-size:14px; margin-bottom:20px; max-width:600px; margin-left:auto; margin-right:auto;">
-                    Películas 4K/1080p, Series completas y Anime en emisión con streaming directo en RAM y subtítulos en español bajo demanda.
-                </p>
 
                 <!-- Barra de búsqueda omnisciente -->
-                <div style="position:relative; width:100%; max-width:680px; margin:0 auto;">
+                <div style="position:relative; width:100%; max-width:720px; margin:0 auto;">
                     <input type="text" id="soberanoSearchInput" class="soberano-search-field" tabindex="0"
-                        placeholder="Busca película, serie, anime o pega magnet: / infoHash..."
+                        placeholder="Busca películas, series, anime, documentales, cursos o pega magnet..."
                         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
                         oninput="onSoberanoSearchInputChange(this.value)"
                         onkeydown="if(event.key==='Enter'||event.keyCode===13){event.preventDefault();executeSoberanoSearch();}">
@@ -4182,17 +4205,24 @@
                         <i class="fa fa-times"></i>
                     </button>
                     <button id="btnExecuteSoberanoSearch" onclick="executeSoberanoSearch()" title="Buscar en enjambre"
-                        style="position:absolute; right:8px; top:50%; transform:translateY(-50%); width:42px; height:42px; border-radius:12px; background:linear-gradient(135deg, #d946ef, #8b5cf6); border:none; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; box-shadow:0 4px 14px rgba(217,70,239,0.4);">
+                        style="position:absolute; right:8px; top:50%; transform:translateY(-50%); width:42px; height:42px; border-radius:12px; background:#0a84ff; border:none; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px;">
                         <i class="fa fa-search"></i>
                     </button>
                 </div>
 
-                <!-- Filtro Útil: Solo en Español (Sin palabras de relleno) -->
-                <div style="display:flex; justify-content:center; margin-top:14px;">
-                    <button class="genre-chip" id="chipSoberanoSpanish" onclick="toggleSoberanoSpanishFilter()" style="background:rgba(255,159,10,0.2); border-color:rgba(255,159,10,0.5); color:#ffd60a; font-weight:700;">
-                        🇪🇸 Solo en Español
-                    </button>
+                <!-- Categorías de Búsqueda Universal + Español -->
+                <div id="soberanoCategoryChips" style="display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:14px;">
+                    <button class="genre-chip active" data-sob-cat="all" onclick="setSoberanoCategory('all', this)">Todo</button>
+                    <button class="genre-chip" data-sob-cat="movie" onclick="setSoberanoCategory('movie', this)">Películas</button>
+                    <button class="genre-chip" data-sob-cat="tv" onclick="setSoberanoCategory('tv', this)">Series</button>
+                    <button class="genre-chip" data-sob-cat="anime" onclick="setSoberanoCategory('anime', this)">Anime</button>
+                    <button class="genre-chip" data-sob-cat="documentary" onclick="setSoberanoCategory('documentary', this)">Documentales</button>
+                    <button class="genre-chip" data-sob-cat="course" onclick="setSoberanoCategory('course', this)">Cursos</button>
+                    <button class="genre-chip" id="chipSoberanoSpanish" onclick="toggleSoberanoSpanishFilter()">Español</button>
                 </div>
+
+                <!-- Más Buscados (1-clic) -->
+                <div id="soberanoMostSearchedRow" style="display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:12px; align-items:center;"></div>
             </section>
 
             <!-- Contenedor de Resultados de Búsqueda -->
@@ -4223,6 +4253,17 @@
                 </div>
                 <div class="shelf-track-container">
                     <div class="shelf-track" id="trackSoberanoTopSeries"></div>
+                </div>
+            </section>
+
+            <!-- Fila 3: Documentales Destacados -->
+            <section class="shelf-section">
+                <div class="shelf-header">
+                    <h2 class="shelf-title"><i class="fa fa-earth-americas" style="font-size:20px; color:#0a84ff;"></i> Documentales en Tendencia</h2>
+                    <span class="shelf-subtitle">Ciencia, historia, naturaleza y tecnología</span>
+                </div>
+                <div class="shelf-track-container">
+                    <div class="shelf-track" id="trackSoberanoTopDocs"></div>
                 </div>
             </section>
         </div>
@@ -4327,12 +4368,12 @@
 
                             <!-- Auto-reproducir Siguiente Episodio (Toggle ON/OFF) -->
                             <button class="btn-ctrl series-only-ctrl" id="btnAutoPlayNext" onclick="toggleAutoPlayNext()" title="Auto-reproducir siguiente episodio al terminar">
-                                <i class="fa fa-forward-fast" id="autoPlayIcon"></i> <span class="btn-text" id="autoPlayText">Auto Sig: ON</span>
+                                <i class="fa fa-forward-fast" id="autoPlayIcon"></i> <span class="btn-text" id="autoPlayText">Auto</span>
                             </button>
 
                             <!-- Lista de Episodios -->
                             <button class="btn-ctrl series-only-ctrl" id="btnListEps" onclick="openEpisodesFromPlayer()" title="Lista de Episodios">
-                                <i class="fa fa-list"></i> <span class="btn-text">Episodios</span>
+                                <i class="fa fa-list"></i> <span class="btn-text">Lista</span>
                             </button>
 
                             <!-- AirPlay Nativo (Apple TV / iOS Safari) -->
@@ -4389,7 +4430,7 @@
     <div class="sheet-overlay" id="sheetOverlay" onclick="closeSheet(event)">
         <div class="sheet-modal" onclick="event.stopPropagation()">
             <div class="sheet-header-banner">
-                <img class="sheet-banner-img" id="sheetBannerImg" src="" alt="Banner" onerror="handleImageError(this)">
+                <img class="sheet-banner-img" id="sheetBannerImg" decoding="async" src="" alt="Banner" onerror="handleImageError(this)">
                 <div class="sheet-banner-grad"></div>
                 <button class="sheet-close-btn" onclick="closeSheet()"><i class="fa fa-times"></i></button>
             </div>
@@ -4444,10 +4485,10 @@
     <!-- ========================================================
          6.5. MODAL DE ENJAMBRE SOBERANO (SELECTOR DE TORRENTS)
          ======================================================== -->
-    <div class="sheet-overlay" id="soberanoSwarmModal" onclick="closeSoberanoSwarmModal(event)" style="z-index:99999;">
+    <div class="sheet-overlay" id="soberanoSwarmModal" onclick="closeSoberanoSwarmModal(event)" style="z-index:8000;">
         <div class="sheet-modal" onclick="event.stopPropagation()" style="max-width:760px;">
             <div class="sheet-header-banner" style="height:190px;">
-                <img class="sheet-banner-img" id="soberanoSwarmBanner" src="" alt="Banner" onerror="handleImageError(this)">
+                <img class="sheet-banner-img" id="soberanoSwarmBanner" decoding="async" src="" alt="Banner" onerror="handleImageError(this)">
                 <div class="sheet-banner-grad"></div>
                 <button class="sheet-close-btn" onclick="closeSoberanoSwarmModal()"><i class="fa fa-times"></i></button>
             </div>
@@ -13117,11 +13158,11 @@
             if (!btn || !txt) return;
             if (autoPlayNextEnabled) {
                 btn.classList.add('btn-autoplay-active');
-                txt.textContent = 'Auto Sig: ON';
+                txt.textContent = 'Auto';
                 if (icon) icon.style.color = '#30d158';
             } else {
                 btn.classList.remove('btn-autoplay-active');
-                txt.textContent = 'Auto Sig: OFF';
+                txt.textContent = 'Auto Off';
                 if (icon) icon.style.color = '#888888';
             }
         }
@@ -13444,12 +13485,55 @@
             if (e && e.target && e.target !== document.getElementById('searchModal') && !e.target.closest('.search-close-x')) return;
             const modal = document.getElementById('searchModal');
             if (modal) modal.classList.remove('active');
-            if (e) FocusManager.popAndRestore('#tabSearch, #universalSearchInput');
+            FocusManager.popAndRestore('#tabSearch');
+        }
+
+        function getMostSearchedTerms() {
+            const defaults = ['Black Clover', 'Dune', 'Python Course', 'Cosmos', 'Attack on Titan', 'Solo Leveling'];
+            try {
+                const stored = JSON.parse(localStorage.getItem('soberano_most_searched') || '[]');
+                if (Array.isArray(stored) && stored.length > 0) {
+                    const merged = Array.from(new Set([...stored, ...defaults]));
+                    return merged.slice(0, 8);
+                }
+            } catch (e) {}
+            return defaults;
+        }
+
+        function recordSearchTerm(term) {
+            const clean = String(term || '').trim();
+            if (!clean || clean.length < 2 || clean.startsWith('magnet:') || /^[a-f0-9]{40}$/i.test(clean)) return;
+            try {
+                let stored = JSON.parse(localStorage.getItem('soberano_most_searched') || '[]');
+                if (!Array.isArray(stored)) stored = [];
+                stored = [clean, ...stored.filter(t => t.toLowerCase() !== clean.toLowerCase())].slice(0, 10);
+                localStorage.setItem('soberano_most_searched', JSON.stringify(stored));
+            } catch (e) {}
         }
 
         function renderInitialSearchResults() {
             const grid = document.getElementById('searchResultsGrid');
             grid.innerHTML = '';
+
+            // Carril rápido de Más Buscados y Tendencias en 1 clic
+            const quickWrap = document.createElement('div');
+            quickWrap.style.cssText = 'grid-column: 1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:10px;';
+            const lbl = document.createElement('span');
+            lbl.style.cssText = 'font-size:12px; font-weight:700; color:#8e8e93; text-transform:uppercase; letter-spacing:0.6px; margin-right:4px;';
+            lbl.textContent = 'Más buscados:';
+            quickWrap.appendChild(lbl);
+            getMostSearchedTerms().forEach(term => {
+                const b = document.createElement('button');
+                b.className = 'genre-chip';
+                b.textContent = term;
+                b.onclick = () => {
+                    const inp = document.getElementById('universalSearchInput');
+                    if (inp) { inp.value = term; onSearchInput(term); }
+                };
+                quickWrap.appendChild(b);
+            });
+            grid.appendChild(quickWrap);
+
             CORE_VAULT.forEach(anime => {
                 grid.appendChild(createSearchResultCard(anime));
             });
@@ -14083,24 +14167,32 @@
                     el.focus({ preventScroll: true });
                 } catch(e) {}
 
-                // Desplazamiento y centrado suave: solo en modo D-Pad o con forceScroll explícito (evita temblor en Magic Remote)
+                // Desplazamiento y centrado fluido sin doble animación (evita tirones en webOS)
                 if (!FocusManager.isPointerMode || forceScroll) {
+                    const isTvDevice = !!(window.webOS || navigator.userAgent.includes('Web0S'));
+                    const scrollMode = isTvDevice ? 'auto' : 'smooth';
                     const shelf = el.closest('.shelf-track, .shelf-scroll, .genres-track, .catalog-filter-bar, .season-tabs-row');
                     if (shelf) {
                         const shelfRect = shelf.getBoundingClientRect();
                         const elRect = el.getBoundingClientRect();
                         const targetLeft = shelf.scrollLeft + (elRect.left - shelfRect.left) - (shelfRect.width / 2) + (elRect.width / 2);
-                        shelf.scrollTo({ left: targetLeft, behavior: 'smooth' });
+                        shelf.scrollTo({ left: targetLeft, behavior: scrollMode });
                     }
 
                     const scrollParent = el.closest('.search-results-grid, .episodes-list, #soberanoTorrentList, .sheet-body');
                     if (scrollParent) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                        const pRect = scrollParent.getBoundingClientRect();
+                        const eRect = el.getBoundingClientRect();
+                        if (eRect.top < pRect.top + 16 || eRect.bottom > pRect.bottom - 16) {
+                            const delta = (eRect.top - pRect.top) - (pRect.height / 2) + (eRect.height / 2);
+                            scrollParent.scrollBy({ top: delta, behavior: scrollMode });
+                        }
                     } else {
                         const rect = el.getBoundingClientRect();
                         const vh = window.innerHeight || document.documentElement.clientHeight;
                         if (rect.top < 100 || rect.bottom > vh - 100) {
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+                            const deltaY = rect.top - (vh / 2) + (rect.height / 2);
+                            window.scrollBy({ top: deltaY, behavior: scrollMode });
                         }
                     }
                 }
@@ -14117,8 +14209,14 @@
 
         // Teclado Magic Keyboard / Apple Remote / Smart TV D-Pad & Magic Remote Pointer
         function initKeyboardShortcuts() {
-            // Soporte Híbrido: Magic Remote Pointer / Ratón de TV (CERO Jitter)
+            if (window.webOS || navigator.userAgent.includes('Web0S')) {
+                document.body.classList.add('webos-tv');
+            }
+            let lastRealMouseMove = 0;
+            window.addEventListener('mousemove', () => { lastRealMouseMove = Date.now(); }, { passive: true });
+            // Soporte Híbrido: Magic Remote Pointer solo si el usuario movió activamente el puntero (< 250ms)
             document.addEventListener('mouseover', (e) => {
+                if (Date.now() - lastRealMouseMove > 250) return;
                 const target = e.target.closest(SpatialNav.focusableSelector);
                 if (target && target !== document.activeElement) {
                     FocusManager.isPointerMode = true;
@@ -16340,14 +16438,45 @@ let activeSoberanoStreams = [];
 async function loadSoberanoView(forceRefresh = false) {
     if (soberanoLoaded && !forceRefresh) return;
     soberanoLoaded = true;
+    renderSoberanoMostSearched();
 
     if (currentSpanishOnlyFilter) {
         fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/discover/movie?with_original_language=es&sort_by=popularity.desc`, 'trackSoberanoTopMovies', 'movie');
         fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/discover/tv?with_original_language=es&sort_by=popularity.desc`, 'trackSoberanoTopSeries', 'tv');
+        fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/discover/movie?with_genres=99&with_original_language=es&sort_by=popularity.desc`, 'trackSoberanoTopDocs', 'movie');
     } else {
-        fetchAndRenderSoberanoRow('https://v3-cinemeta.strem.io/catalog/movie/top.json', 'trackSoberanoTopMovies', 'movie');
-        fetchAndRenderSoberanoRow('https://v3-cinemeta.strem.io/catalog/series/top.json', 'trackSoberanoTopSeries', 'tv');
+        fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/trending/movie/day`, 'trackSoberanoTopMovies', 'movie');
+        fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/trending/tv/week`, 'trackSoberanoTopSeries', 'tv');
+        fetchAndRenderSoberanoRow(`${PROXY_BASE}/api/tmdb/discover/movie?with_genres=99&sort_by=popularity.desc`, 'trackSoberanoTopDocs', 'movie');
     }
+}
+
+let activeSoberanoCategory = 'all';
+
+function setSoberanoCategory(cat, btn) {
+    activeSoberanoCategory = cat || 'all';
+    document.querySelectorAll('#soberanoCategoryChips .genre-chip[data-sob-cat]').forEach(el => {
+        el.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
+    const inp = document.getElementById('soberanoSearchInput');
+    if (inp && inp.value.trim().length > 0) {
+        executeSoberanoSearch();
+    }
+}
+
+function renderSoberanoMostSearched() {
+    const row = document.getElementById('soberanoMostSearchedRow');
+    if (!row) return;
+    row.innerHTML = '<span style="font-size:12px; font-weight:700; color:#8e8e93; text-transform:uppercase; letter-spacing:0.6px;">Más buscados:</span>';
+    getMostSearchedTerms().slice(0, 6).forEach(term => {
+        const b = document.createElement('button');
+        b.className = 'genre-chip';
+        b.style.cssText = 'padding:6px 12px; font-size:12px;';
+        b.textContent = term;
+        b.onclick = () => quickSoberanoSearch(term);
+        row.appendChild(b);
+    });
 }
 
 async function fetchAndRenderSoberanoRow(url, containerId, mediaType) {
@@ -16393,23 +16522,35 @@ function createSoberanoCard(item, mediaType = 'movie') {
     card.tabIndex = 0;
 
     const title = item.name || item.title || 'Sin título';
-    const poster = item.poster || getCanonicalPoster('', title);
+    const isDirectP2P = !!(item.direct_p2p || item.source === 'direct_p2p');
+    const poster = item.poster || (isDirectP2P ? '' : getCanonicalPoster('', title));
     const year = (item.releaseInfo || item.year || '').substring(0, 4);
+    const catTag = item.categoryLabel || (mediaType === 'tv' ? 'Serie' : 'Película');
+    const subLine = isDirectP2P
+        ? `${item.seeds || 0} seeds${item.sizeLabel ? ' • ' + item.sizeLabel : (item.sizeBytes ? ' • ' + (item.sizeBytes / (1024*1024*1024)).toFixed(2) + ' GB' : '')}`
+        : `${year ? year + ' • ' : ''}${catTag}`;
 
     card.onclick = () => openSoberanoSwarmModal(item, mediaType);
     card.onkeydown = (e) => {
         if (e.key === 'Enter') openSoberanoSwarmModal(item, mediaType);
     };
 
+    const visualHeader = poster
+        ? `<img class="poster-img" src="${poster}" alt="${escapeHtml(title)}" loading="lazy" decoding="async" onerror="handleImageError(this)">`
+        : `<div style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:14px; text-align:center; background:linear-gradient(145deg, #161c28 0%, #0d1119 100%);">
+                <i class="fa ${catTag === 'Curso' ? 'fa-graduation-cap' : (catTag === 'Documental' ? 'fa-earth-americas' : 'fa-bolt')}" style="font-size:28px; color:#0a84ff; margin-bottom:10px;"></i>
+                <div style="font-size:13px; font-weight:700; color:#fff; line-height:1.3; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">${escapeHtml(title)}</div>
+           </div>`;
+
     card.innerHTML = `
         <div class="poster-container">
-            <img class="poster-img" src="${poster}" alt="${escapeHtml(title)}" loading="lazy" decoding="async" onerror="handleImageError(this)">
-            <span class="card-pill-tag" style="background:rgba(217,70,239,0.7);"><i class="fa fa-infinity"></i> Torrent</span>
+            ${visualHeader}
+            <span class="card-pill-tag">${escapeHtml(catTag)}</span>
             <div class="card-play-hover-icon"><i class="fa fa-play"></i></div>
         </div>
         <div class="poster-info">
             <div class="poster-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
-            <div class="poster-sub">${year ? year + ' • ' : ''}Enjambre 4K/HD</div>
+            <div class="poster-sub">${escapeHtml(subLine)}</div>
         </div>
     `;
     return card;
@@ -16447,6 +16588,8 @@ async function executeSoberanoSearch() {
     const input = document.getElementById('soberanoSearchInput');
     const query = input ? input.value.trim() : '';
     if (!query) return;
+    recordSearchTerm(query);
+    renderSoberanoMostSearched();
 
     // Detección de Magnet Link o InfoHash pegado directamente
     if (query.startsWith('magnet:') || /^[a-fA-F0-9]{40}$/.test(query)) {
@@ -16472,20 +16615,21 @@ async function executeSoberanoSearch() {
     if (titleEl) titleEl.innerHTML = `<i class="fa fa-search" style="color:#e879f9;"></i> Resultados para "${escapeHtml(query)}"`;
 
     try {
-        const resp = await fetch(`${PROXY_BASE}/api/soberano/search?q=${encodeURIComponent(query)}`);
+        const resp = await fetch(`${PROXY_BASE}/api/soberano/search?q=${encodeURIComponent(query)}&cat=${encodeURIComponent(activeSoberanoCategory || 'all')}`);
         const data = await resp.json();
         const results = (data && Array.isArray(data.results)) ? data.results : [];
 
         if (countEl) countEl.textContent = `${results.length} encontrados`;
 
         if (results.length === 0) {
-            grid.innerHTML = '<div style="color:var(--text-muted); padding:40px; grid-column:1/-1; text-align:center;">No se encontraron títulos en el enjambre para esta búsqueda.</div>';
+            grid.innerHTML = '<div style="color:var(--text-muted); padding:40px; grid-column:1/-1; text-align:center;">No se encontraron resultados en el enjambre para esta categoría.</div>';
             return;
         }
 
         grid.innerHTML = '';
         results.forEach(res => {
             const card = createSoberanoCard({
+                ...res,
                 id: res.id,
                 name: res.title,
                 poster: res.poster,
@@ -16494,7 +16638,7 @@ async function executeSoberanoSearch() {
             grid.appendChild(card);
         });
 
-        secResults.scrollIntoView({ behavior: 'smooth' });
+        secResults.scrollIntoView({ behavior: (window.webOS || navigator.userAgent.includes('Web0S')) ? 'auto' : 'smooth' });
         setTimeout(() => {
             const firstCard = grid.querySelector('.catalog-card, .tv-card');
             if (firstCard && typeof SpatialNav !== 'undefined') {
@@ -16539,6 +16683,14 @@ async function openSoberanoSwarmModal(item, mediaType = 'movie', targetSeason = 
         if (firstFocus && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstFocus, true);
     }, 100);
 
+    // Si es un torrent P2P directo (Curso, Documental independiente, Pack multi-archivo), listar sus archivos reales en RAM
+    if (item.direct_p2p && item.infoHash) {
+        if (epBar) epBar.style.display = 'none';
+        if (typeBadge) typeBadge.textContent = item.categoryLabel || 'Torrent P2P';
+        loadDirectP2PTorrentFiles(item);
+        return;
+    }
+
     // Configuración del selector de Episodios si es Serie o Anime
     if (isTv && epBar) {
         epBar.style.display = 'block';
@@ -16548,6 +16700,68 @@ async function openSoberanoSwarmModal(item, mediaType = 'movie', targetSeason = 
         currentSoberanoSeason = 1;
         currentSoberanoEpisode = 1;
         loadSoberanoTorrentList(item.id, 'movie', 1, 1);
+    }
+}
+
+async function loadDirectP2PTorrentFiles(item) {
+    const listEl = document.getElementById('soberanoTorrentList');
+    const countBadge = document.getElementById('soberanoTorrentCountBadge');
+    if (!listEl) return;
+    const hash = String(item.infoHash || item.id || '').toLowerCase();
+    const title = item.title || item.name || 'Torrent P2P';
+    if (countBadge) countBadge.textContent = `${item.seeds || 0} seeds`;
+    listEl.innerHTML = '<div style="color:var(--text-muted); padding:30px; text-align:center;"><i class="fa fa-spinner fa-spin fa-2x"></i><p style="margin-top:10px;">Leyendo archivos / clases dentro del torrent en RAM...</p></div>';
+
+    const playDirectIdx = async (fileIdx, fileName) => {
+        try {
+            showToast(`⚡ Conectando flujo RAM: ${fileName}...`);
+            const playUrl = `${PROXY_BASE}/api/soberano/play?hash=${encodeURIComponent(hash)}&fileIdx=${fileIdx}&title=${encodeURIComponent(fileName)}&is_es=0`;
+            const resp = await fetch(playUrl);
+            const tData = await resp.json();
+            if (tData && tData.status === 'ok' && tData.direct_stream_url) {
+                closeSoberanoSwarmModal();
+                launchSoberanoTorrentPlayback(tData, { id: hash, title: fileName, media_type: 'movie' }, null, null, { infoHash: hash, filename: fileName, quality: 'HD', seeds: item.seeds || 0, is_es: false });
+            } else {
+                showToast('⚠️ No se pudo iniciar este archivo del torrent');
+            }
+        } catch (errP) {
+            showToast('⚠️ Error conectando torrent: ' + errP.message);
+        }
+    };
+
+    try {
+        const fResp = await fetch(`${PROXY_BASE}/api/soberano/files?hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(title)}`);
+        const fData = await fResp.json();
+        const files = (fData && Array.isArray(fData.files)) ? fData.files : [];
+        if (files.length === 0) {
+            listEl.innerHTML = `<div style="padding:18px; text-align:center;"><button class="btn-apple-primary" id="btnPlayFallbackP2P"><i class="fa fa-play"></i> Reproducir Torrent Directo</button></div>`;
+            const b = document.getElementById('btnPlayFallbackP2P');
+            if (b) b.onclick = () => playDirectIdx(0, title);
+            return;
+        }
+        if (countBadge) countBadge.textContent = `${files.length} video${files.length > 1 ? 's' : ''} • ${item.seeds || 0} seeds`;
+        listEl.innerHTML = '';
+        files.forEach((f, n) => {
+            const row = document.createElement('div');
+            row.className = 'soberano-torrent-item';
+            row.tabIndex = 0;
+            const mb = f.length ? (f.length / (1024 * 1024)).toFixed(0) + ' MB' : '';
+            row.innerHTML = `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;">
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-size:14px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n + 1}. ${escapeHtml(f.name)}</div>
+                        <div style="font-size:12px; color:#8e8e93; margin-top:2px;">${escapeHtml(f.path)}${mb ? ' • ' + mb : ''}</div>
+                    </div>
+                    <span class="btn-apple-primary" style="padding:6px 14px; font-size:12px; flex-shrink:0;"><i class="fa fa-play"></i> Ver</span>
+                </div>`;
+            row.onclick = () => playDirectIdx(f.idx, f.name);
+            row.onkeydown = (e) => { if (e.key === 'Enter') playDirectIdx(f.idx, f.name); };
+            listEl.appendChild(row);
+        });
+        const firstRow = listEl.querySelector('.soberano-torrent-item');
+        if (firstRow && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstRow, true);
+    } catch (e) {
+        listEl.innerHTML = `<div style="color:var(--text-muted); padding:24px; text-align:center;">Error leyendo archivos del torrent: ${escapeHtml(e.message)}</div>`;
     }
 }
 
