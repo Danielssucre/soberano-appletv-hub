@@ -105,10 +105,6 @@
             contain: layout style !important;
         }
 
-        .shelf-section {
-            content-visibility: auto;
-            contain-intrinsic-size: 0 360px;
-        }
         .ep-row-card {
             content-visibility: auto;
             contain-intrinsic-size: 0 68px;
@@ -14069,6 +14065,10 @@
                 return elements.filter(el => {
                     if (el.disabled || el.getAttribute('aria-hidden') === 'true') return false;
                     if (el.offsetParent === null && el !== document.activeElement) return false;
+                    // Evitar doble foco en elementos hijos dentro de tarjetas/filas ya enfocables
+                    if (el.parentElement && el.parentElement.closest('.tv-card, .tv-poster-card, .catalog-card, .ep-row-card, .soberano-torrent-item')) return false;
+                    const cs = getComputedStyle(el);
+                    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') return false;
                     const rect = el.getBoundingClientRect();
                     return rect.width > 5 && rect.height > 5;
                 });
@@ -14087,7 +14087,6 @@
 
                 const active = document.activeElement;
                 if (!active || !candidates.includes(active)) {
-                    // Si no hay foco activo en este contexto, buscar el primer candidato prioritario (tarjetas, solapas o filas de contenido)
                     const first = candidates.find(el => 
                         el.classList.contains('tv-poster-card') ||
                         el.classList.contains('tv-card') || 
@@ -14103,75 +14102,65 @@
 
                 const currentRect = active.getBoundingClientRect();
                 const currentCenter = this.getCenter(currentRect);
+                const isVert = (direction === 'down' || direction === 'up');
 
-                let bestCandidate = null;
-                let minDistance = Infinity;
+                const pickBest = (pool, strictAxis) => {
+                    let best = null;
+                    let bestScore = Infinity;
+                    for (let i = 0; i < pool.length; i++) {
+                        const cand = pool[i];
+                        if (cand === active) continue;
+                        const rect = cand.getBoundingClientRect();
+                        const center = this.getCenter(rect);
+                        const dx = center.x - currentCenter.x;
+                        const dy = center.y - currentCenter.y;
 
-                candidates.forEach(candidate => {
-                    if (candidate === active) return;
-                    const rect = candidate.getBoundingClientRect();
-                    const center = this.getCenter(rect);
+                        let ok = false;
+                        let primaryDist = 0;
+                        let secondaryDist = 0;
 
-                    const dx = center.x - currentCenter.x;
-                    const dy = center.y - currentCenter.y;
-
-                    let inDirection = false;
-                    let primaryDist = 0;
-                    let secondaryDist = 0;
-
-                    switch (direction) {
-                        case 'right':
-                            inDirection = dx > 5;
+                        if (direction === 'right') {
+                            const sameRow = Math.min(rect.bottom, currentRect.bottom) - Math.max(rect.top, currentRect.top) > -10;
+                            ok = (strictAxis ? (sameRow && center.x > currentCenter.x + 8) : dx > 12);
                             primaryDist = dx;
                             secondaryDist = Math.abs(dy);
-                            break;
-                        case 'left':
-                            inDirection = dx < -5;
+                        } else if (direction === 'left') {
+                            const sameRow = Math.min(rect.bottom, currentRect.bottom) - Math.max(rect.top, currentRect.top) > -10;
+                            ok = (strictAxis ? (sameRow && center.x < currentCenter.x - 8) : dx < -12);
                             primaryDist = Math.abs(dx);
                             secondaryDist = Math.abs(dy);
-                            break;
-                        case 'down':
-                            inDirection = dy > 5;
+                        } else if (direction === 'down') {
+                            ok = strictAxis ? (rect.top >= currentRect.bottom - 14 && dy > 10) : (dy > 16);
                             primaryDist = dy;
                             secondaryDist = Math.abs(dx);
-                            break;
-                        case 'up':
-                            inDirection = dy < -5;
+                        } else if (direction === 'up') {
+                            ok = strictAxis ? (rect.bottom <= currentRect.top + 14 && dy < -10) : (dy < -16);
                             primaryDist = Math.abs(dy);
                             secondaryDist = Math.abs(dx);
-                            break;
-                    }
+                        }
 
-                    if (inDirection) {
-                        // Ponderación geométrica adaptada: da paso natural tanto a saltos verticales entre estantes como horizontales
-                        const isVert = (direction === 'down' || direction === 'up');
-                        const score = isVert 
-                            ? (primaryDist * 1.0 + secondaryDist * 1.8) 
-                            : (primaryDist * 1.0 + secondaryDist * 2.8);
-                        if (score < minDistance) {
-                            minDistance = score;
-                            bestCandidate = candidate;
+                        if (ok) {
+                            const score = isVert
+                                ? (primaryDist * 1.0 + secondaryDist * 1.6)
+                                : (primaryDist * 1.0 + secondaryDist * 2.5);
+                            if (score < bestScore) {
+                                bestScore = score;
+                                best = cand;
+                            }
                         }
                     }
-                });
+                    return best;
+                };
+
+                // Pasada 1: estricta por fila/columna (jamás salta de lado al bajar, ni de fila al ir a los lados)
+                let bestCandidate = pickBest(candidates, true);
+                // Pasada 2 (solo vertical): si no hay nada en la misma columna estricta, buscar en la fila siguiente/anterior
+                if (!bestCandidate && isVert) {
+                    bestCandidate = pickBest(candidates, false);
+                }
 
                 if (bestCandidate) {
                     this.focusElement(bestCandidate);
-                } else if (direction === 'down' || direction === 'up') {
-                    // Fallback vertical para saltar de estante a estante
-                    const fallback = candidates
-                        .filter(el => {
-                            const r = el.getBoundingClientRect();
-                            return direction === 'down' ? (r.top >= currentRect.bottom - 10) : (r.bottom <= currentRect.top + 10);
-                        })
-                        .sort((a, b) => {
-                            const ra = a.getBoundingClientRect();
-                            const rb = b.getBoundingClientRect();
-                            const dyA = Math.abs(this.getCenter(ra).y - currentCenter.y);
-                            const dyB = Math.abs(this.getCenter(rb).y - currentCenter.y);
-                            return dyA - dyB;
-                        })[0];
-                    if (fallback) this.focusElement(fallback);
                 }
             },
 
