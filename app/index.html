@@ -1809,14 +1809,16 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 14px 18px;
-            margin-bottom: 8px;
+            height: auto;
+            min-height: 76px;
+            padding: 16px 20px;
+            margin-bottom: 10px;
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 14px;
             cursor: pointer;
-            transition: all 0.15s ease;
-            gap: 16px;
+            transition: transform 0.12s ease-out, opacity 0.12s ease-out;
+            gap: 18px;
             outline: none;
         }
 
@@ -4482,7 +4484,7 @@
          6.5. MODAL DE ENJAMBRE SOBERANO (SELECTOR DE TORRENTS)
          ======================================================== -->
     <div class="sheet-overlay" id="soberanoSwarmModal" onclick="closeSoberanoSwarmModal(event)" style="z-index:8000;">
-        <div class="sheet-modal" onclick="event.stopPropagation()" style="max-width:760px;">
+        <div class="sheet-modal" onclick="event.stopPropagation()" style="max-width:min(1080px, 92vw); width:100%;">
             <div class="sheet-header-banner" style="height:190px;">
                 <img class="sheet-banner-img" id="soberanoSwarmBanner" decoding="async" src="" alt="Banner" onerror="handleImageError(this)">
                 <div class="sheet-banner-grad"></div>
@@ -16775,8 +16777,8 @@ async function loadDirectP2PTorrentFiles(item) {
             row.innerHTML = `
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;">
                     <div style="min-width:0; flex:1;">
-                        <div style="font-size:14px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${n + 1}. ${escapeHtml(f.name)}</div>
-                        <div style="font-size:12px; color:#8e8e93; margin-top:2px;">${escapeHtml(f.path)}${mb ? ' • ' + mb : ''}</div>
+                        <div style="font-size:14.5px; font-weight:600; color:#fff; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.4;">${n + 1}. ${escapeHtml(f.name)}</div>
+                        <div style="font-size:12px; color:#8e8e93; margin-top:4px; white-space:normal; overflow-wrap:anywhere;">${escapeHtml(f.path)}${mb ? ' • ' + mb : ''}</div>
                     </div>
                     <span class="btn-apple-primary" style="padding:6px 14px; font-size:12px; flex-shrink:0;"><i class="fa fa-play"></i> Ver</span>
                 </div>`;
@@ -16958,8 +16960,8 @@ function renderSoberanoTorrentListFromCache() {
                         ${stream.size ? `<span class="meta-badge" style="background:rgba(255,255,255,0.08); color:var(--text-muted);"><i class="fa fa-hdd"></i> ${stream.size}</span>` : ''}
                         ${isTopSeeds ? '<span class="meta-badge" style="background:rgba(48,209,88,0.25); color:#30d158; font-weight:700;"><i class="fa fa-bolt"></i> Máxima Velocidad</span>' : ''}
                     </div>
-                    <!-- Fila 2: Nombre y Descripción completa del Archivo (Sin solapamientos, legible y fluido) -->
-                    <div style="font-size:13.5px; font-weight:600; color:#ffffff; line-height:1.4; word-break:break-word; max-height:44px; overflow:hidden; margin:4px 0;" title="${escapeHtml(rawTitle)}">
+                    <!-- Fila 2: Nombre y Descripción completa del Archivo (Auto-ajustable, sin recortes) -->
+                    <div style="font-size:14.5px; font-weight:600; color:#ffffff; line-height:1.45; white-space:normal; overflow-wrap:anywhere; word-break:break-word; margin:6px 0;" title="${escapeHtml(rawTitle)}">
                         ${escapeHtml(rawTitle)}
                     </div>
                     <!-- Fila 3: Metadatos del Tracker y Servidor -->
