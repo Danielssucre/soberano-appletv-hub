@@ -11765,12 +11765,34 @@
             if (countBadge) countBadge.textContent = 'Episodios';
             document.getElementById('seasonTabsRow').innerHTML = '<button class="season-tab active" type="button" data-season="0">Episodios Completos</button>';
             const listContainer = document.getElementById('sheetEpisodesList');
-            listContainer.innerHTML = '<div class="apple-spinner"></div>';
+            // Render inmediato de Episodios 12..1 para arranque instantáneo mientras /api/anime consulta el conteo exacto
+            listContainer.innerHTML = '';
+            for (let i = 12; i >= 1; i--) {
+                const row = document.createElement('div');
+                row.className = 'ep-row-card';
+                row.setAttribute('tabindex', '0');
+                const epObj = { episode: i, title: `Episodio ${i}`, duration_sec: 1440, servers: [{ url: `https://jkanime.net/${item.slug}/${i}/`, type: "scrape" }] };
+                row.onclick = () => {
+                    closeSheet();
+                    launchEpisodePlayback({ id: item.slug, slug: item.slug, title: cleanTitle, poster: item.poster }, epObj);
+                };
+                row.innerHTML = `
+                    <div class="ep-row-left">
+                        <span class="ep-num-pill">E${i}</span>
+                        <div>
+                            <div class="ep-row-title">Episodio ${i}</div>
+                            <div class="ep-row-meta">24 min • Sub Español HD</div>
+                        </div>
+                    </div>
+                    <div class="ep-row-play"><i class="fa fa-play"></i></div>
+                `;
+                listContainer.appendChild(row);
+            }
             overlay.classList.add('active');
             setTimeout(() => {
-                const firstFocus = overlay.querySelector('.season-tab, .ep-row-card, .sheet-close-btn');
+                const firstFocus = overlay.querySelector('.ep-row-card, .season-tab, .sheet-close-btn');
                 if (firstFocus && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(firstFocus, true);
-            }, 80);
+            }, 60);
 
             // SOBERANO INTENT PRE-BUFFER: Cache Master Playlist & first 3 chunks into Mac M3 RAM
             if (item.slug) {
@@ -11780,7 +11802,6 @@
             try {
                 let data = null;
                 if (!PROXY_BASE) {
-                    // Modo Cloud Autónomo: Consultar Kitsu API para sinopsis y total de episodios
                     try {
                         const kResp = await fetch(`https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(cleanTitle)}&page[limit]=1`);
                         const kData = await kResp.json();
@@ -14974,36 +14995,6 @@
             FocusManager.push(document.activeElement);
             activeTmdbItem = { ...item, media_type: mediaType };
             activeAnime = null;
-
-            // Si el item viene con IMDb ID (ej: tt0807832), resolver id numérico de TMDB de inmediato
-            if (activeTmdbItem.id && String(activeTmdbItem.id).startsWith('tt')) {
-                try {
-                    const findResp = await fetch(`${PROXY_BASE}/api/tmdb/find/${activeTmdbItem.id}?external_source=imdb_id`);
-                    if (findResp.ok) {
-                        const findData = await findResp.json();
-                        const hit = (findData.tv_results && findData.tv_results[0]) || (findData.movie_results && findData.movie_results[0]);
-                        if (hit && hit.id) {
-                            activeTmdbItem.id = hit.id;
-                            activeTmdbItem.tmdb_id = hit.id;
-                            if (hit.title || hit.name) {
-                                activeTmdbItem.title = hit.title || hit.name;
-                                activeTmdbItem.name = hit.title || hit.name;
-                            }
-                        }
-                    }
-                } catch(e) {}
-            }
-
-            // SOBERANO SPECULATIVE PRE-WARMING (Instant-Start < 200ms)
-            // Pre-calienta en la RAM del Mac M3 el manifiesto, llaves y primer segmento mientras el usuario lee
-            const preTitle = encodeURIComponent(item.title || item.name || '');
-            const preOrigTitle = encodeURIComponent(item.original_title || item.original_name || '');
-            const preLang = encodeURIComponent(item.original_language || 'en');
-            if (mediaType === 'movie') {
-                fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=movie&orig_lang=${preLang}&title=${preTitle}&orig_title=${preOrigTitle}`).catch(() => {});
-            } else {
-                fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=tv&s=1&e=1&orig_lang=${preLang}`).catch(() => {});
-            }
             
             const overlay = document.getElementById('sheetOverlay');
             const banner = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : (item.poster_path ? `https://image.tmdb.org/t/p/w780${item.poster_path}` : '');
@@ -15063,7 +15054,28 @@
             }, 80);
 
             try {
+                // Si el item viene con IMDb ID (ej: tt0807832), resolver id numérico de TMDB sin bloquear la apertura
+                if (activeTmdbItem.id && String(activeTmdbItem.id).startsWith('tt') && PROXY_BASE) {
+                    try {
+                        const findResp = await fetch(`${PROXY_BASE}/api/tmdb/find/${activeTmdbItem.id}?external_source=imdb_id`);
+                        if (findResp.ok) {
+                            const findData = await findResp.json();
+                            const hit = (findData.tv_results && findData.tv_results[0]) || (findData.movie_results && findData.movie_results[0]);
+                            if (hit && hit.id) {
+                                activeTmdbItem.id = hit.id;
+                                activeTmdbItem.tmdb_id = hit.id;
+                                item = { ...item, id: hit.id, tmdb_id: hit.id };
+                                if (hit.title || hit.name) {
+                                    activeTmdbItem.title = hit.title || hit.name;
+                                    activeTmdbItem.name = hit.title || hit.name;
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                }
+
                 let full = {};
+                let prefetchedSeason1 = null;
                 if (!PROXY_BASE) {
                     const isM = mediaType === 'movie';
                     const cResp = await fetch(`https://v3-cinemeta.strem.io/meta/${isM ? 'movie' : 'series'}/${item.id}.json`);
@@ -15082,13 +15094,17 @@
                     full.seasons = sNums.map(s => ({ season_number: s, name: `Temporada ${s}` }));
                     window.__cinemetaVideos = vids;
                 } else {
-                    let resp = await fetch(`${PROXY_BASE}/api/tmdb/${mediaType}/${item.id}?language=es-MX&append_to_response=credits,recommendations,videos`);
-                    full = await resp.json().catch(() => ({}));
-                    // Si TMDB 404 o sin títulos, verificar si es serie/película con el tipo opuesto (ej. Derry que es Serie TV)
+                    const detailPromise = fetch(`${PROXY_BASE}/api/tmdb/${mediaType}/${item.id}?language=es-MX`).then(r => r.json()).catch(() => ({}));
+                    const s1Promise = mediaType === 'tv'
+                        ? fetch(`${PROXY_BASE}/api/tmdb/tv/${item.id}/season/1?language=es-MX`).then(r => r.ok ? r.json() : null).catch(() => null)
+                        : Promise.resolve(null);
+                    const [dRes, s1Res] = await Promise.all([detailPromise, s1Promise]);
+                    full = dRes || {};
+                    prefetchedSeason1 = s1Res;
                     if (!full || !full.id || (!full.title && !full.name)) {
                         const altType = mediaType === 'movie' ? 'tv' : 'movie';
                         try {
-                            const altResp = await fetch(`${PROXY_BASE}/api/tmdb/${altType}/${item.id}?language=es-MX&append_to_response=credits,recommendations,videos`);
+                            const altResp = await fetch(`${PROXY_BASE}/api/tmdb/${altType}/${item.id}?language=es-MX`);
                             if (altResp.ok) {
                                 const altData = await altResp.json();
                                 if (altData && (altData.title || altData.name)) {
@@ -15099,7 +15115,7 @@
                                     const y = (full.release_date || full.first_air_date || '').substring(0, 4);
                                     badgesWrap.innerHTML = `
                                         <span class="meta-badge">${y || '2025'}</span>
-                                        <span class="meta-badge">${mediaType === 'movie' ? '🎬 Película' : '📺 Serie TV'}</span>
+                                        <span class="meta-badge">${mediaType === 'movie' ? 'Película' : 'Serie TV'}</span>
                                         <span class="meta-badge" style="color:var(--apple-emerald);">${rating}</span>
                                         <span class="meta-badge" style="background:rgba(48,209,88,0.2); color:var(--apple-emerald);">Subtítulos en Español</span>
                                     `;
@@ -15114,6 +15130,20 @@
                         }
                     }
                 }
+                if (prefetchedSeason1 && prefetchedSeason1.episodes) {
+                    window.__prefetchedTmdbSeason = { id: String(item.id), season: 1, data: prefetchedSeason1 };
+                }
+                const preTitle = encodeURIComponent(full.title || full.name || item.title || item.name || '');
+                const preOrigTitle = encodeURIComponent(full.original_title || full.original_name || item.original_title || item.original_name || '');
+                const preLang = encodeURIComponent(full.original_language || item.original_language || 'en');
+                setTimeout(() => {
+                    if (!activeTmdbItem || String(activeTmdbItem.id) !== String(item.id)) return;
+                    if (mediaType === 'movie') {
+                        fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=movie&orig_lang=${preLang}&title=${preTitle}&orig_title=${preOrigTitle}`).catch(() => {});
+                    } else {
+                        fetch(`${PROXY_BASE}/api/resolve_tmdb?id=${item.id}&type=tv&s=1&e=1&orig_lang=${preLang}`).catch(() => {});
+                    }
+                }, 1200);
                 
                 if (full.title || full.name) {
                     const spanishTitle = full.title || full.name;
@@ -15259,8 +15289,14 @@
                         runtime: 45
                     }));
                 } else {
-                    const resp = await fetch(`${PROXY_BASE}/api/tmdb/tv/${activeTmdbItem.id}/season/${seasonNum}?language=es-MX`);
-                    const seasonData = await resp.json();
+                    let seasonData = null;
+                    if (window.__prefetchedTmdbSeason && String(window.__prefetchedTmdbSeason.id) === String(activeTmdbItem.id) && window.__prefetchedTmdbSeason.season === seasonNum) {
+                        seasonData = window.__prefetchedTmdbSeason.data;
+                        window.__prefetchedTmdbSeason = null;
+                    } else {
+                        const resp = await fetch(`${PROXY_BASE}/api/tmdb/tv/${activeTmdbItem.id}/season/${seasonNum}?language=es-MX`);
+                        seasonData = await resp.json();
+                    }
                     eps = seasonData.episodes || [];
                     // Fallback a idioma original si una temporada recién estrenada aún no tiene traducción en TMDB
                     if (eps.length === 0) {
@@ -16785,6 +16821,26 @@ async function initSoberanoSeasonEpisodeSelectors(item, targetSeason = 1, target
     let seasonsList = [];
     soberanoCachedVideos = [];
 
+    // Lanzar carga de torrents EN PARALELO inmediato sin esperar al waterfall de Cinemeta
+    loadSoberanoTorrentList(item.id, 'tv', currentSoberanoSeason, currentSoberanoEpisode);
+
+    // Renderizar solapas iniciales al instante (0ms) y actualizarlas al recibir Cinemeta
+    const renderTabs = (list) => {
+        sTabs.innerHTML = '';
+        list.forEach(s => {
+            const btn = document.createElement('button');
+            btn.className = `season-tab ${s === currentSoberanoSeason ? 'active' : ''}`;
+            btn.type = 'button';
+            btn.tabIndex = 0;
+            btn.dataset.season = s;
+            btn.textContent = `Temporada ${s}`;
+            btn.onclick = () => selectSoberanoSeason(s, btn);
+            sTabs.appendChild(btn);
+        });
+    };
+    renderTabs([1, 2, 3, 4, 5].includes(currentSoberanoSeason) ? [1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, currentSoberanoSeason].sort((a, b) => a - b));
+    renderSoberanoEpisodeTabs(currentSoberanoSeason);
+
     // 1. Resolver IMDb ID si el ID es numérico de TMDB
     let imdbId = item.imdb_id || item.id;
     if (/^\d+$/.test(imdbId)) {
@@ -16812,30 +16868,14 @@ async function initSoberanoSeasonEpisodeSelectors(item, targetSeason = 1, target
         } catch (e) {}
     }
 
-    // 3. Fallback en caso de fallo de red
-    if (seasonsList.length === 0) {
-        seasonsList = [1, 2, 3, 4, 5];
-        if (currentSoberanoSeason > 5) seasonsList.push(currentSoberanoSeason);
-    } else if (!seasonsList.includes(currentSoberanoSeason)) {
-        seasonsList.push(currentSoberanoSeason);
-        seasonsList.sort((a, b) => a - b);
+    if (seasonsList.length > 0) {
+        if (!seasonsList.includes(currentSoberanoSeason)) {
+            seasonsList.push(currentSoberanoSeason);
+            seasonsList.sort((a, b) => a - b);
+        }
+        renderTabs(seasonsList);
+        renderSoberanoEpisodeTabs(currentSoberanoSeason);
     }
-
-    // Renderizar Solapas de Temporadas (Apple HIG Season Tabs)
-    sTabs.innerHTML = '';
-    seasonsList.forEach(s => {
-        const btn = document.createElement('button');
-        btn.className = `season-tab ${s === currentSoberanoSeason ? 'active' : ''}`;
-        btn.type = 'button';
-        btn.tabIndex = 0;
-        btn.dataset.season = s;
-        btn.textContent = `Temporada ${s}`;
-        btn.onclick = () => selectSoberanoSeason(s, btn);
-        sTabs.appendChild(btn);
-    });
-
-    renderSoberanoEpisodeTabs(currentSoberanoSeason);
-    loadSoberanoTorrentList(item.id, 'tv', currentSoberanoSeason, currentSoberanoEpisode);
 }
 
 function selectSoberanoSeason(seasonNum, activeBtn) {

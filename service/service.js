@@ -274,8 +274,17 @@ async function fetchJson(targetUrl, customHeaders = {}, timeoutMs = 6500) {
     }
 }
 
-function fetchText(targetUrl, customHeaders = {}, timeoutMs = 6500) {
+function fetchText(targetUrl, customHeaders = {}, timeoutMs = 4500) {
     return new Promise((resolve, reject) => {
+        let settled = false;
+        let req = null;
+        const hardTimer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                try { if (req) req.abort(); } catch (e) {}
+                reject(new Error('Hard Timeout'));
+            }
+        }, timeoutMs);
         try {
             const parsed = url.parse(targetUrl);
             const client = parsed.protocol === 'https:' ? https : http;
@@ -284,29 +293,47 @@ function fetchText(targetUrl, customHeaders = {}, timeoutMs = 6500) {
                 port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
                 path: parsed.path,
                 method: 'GET',
+                family: 4,
                 headers: Object.assign({}, HEADERS, customHeaders),
                 timeout: timeoutMs
             };
 
-            const req = client.request(opts, (res) => {
+            req = client.request(opts, (res) => {
                 if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    clearTimeout(hardTimer);
+                    res.resume();
                     let redirectUrl = res.headers.location;
                     if (!redirectUrl.startsWith('http')) {
                         redirectUrl = url.resolve(targetUrl, redirectUrl);
                     }
-                    return fetchText(redirectUrl, customHeaders, timeoutMs).then(resolve).catch(reject);
+                    if (!settled) {
+                        settled = true;
+                        fetchText(redirectUrl, customHeaders, timeoutMs).then(resolve).catch(reject);
+                    }
+                    return;
                 }
                 let data = '';
                 res.setEncoding('utf8');
                 res.on('data', chunk => { data += chunk; });
-                res.on('end', () => resolve(data));
+                res.on('end', () => {
+                    clearTimeout(hardTimer);
+                    if (!settled) { settled = true; resolve(data); }
+                });
             });
 
-            req.on('error', reject);
-            req.on('timeout', () => { req.abort(); reject(new Error('Timeout')); });
+            req.on('error', (err) => {
+                clearTimeout(hardTimer);
+                if (!settled) { settled = true; reject(err); }
+            });
+            req.on('timeout', () => {
+                clearTimeout(hardTimer);
+                try { req.abort(); } catch (e) {}
+                if (!settled) { settled = true; reject(new Error('Timeout')); }
+            });
             req.end();
         } catch (e) {
-            reject(e);
+            clearTimeout(hardTimer);
+            if (!settled) { settled = true; reject(e); }
         }
     });
 }
@@ -515,6 +542,31 @@ async function searchAnimes(query) {
     }
 }
 
+function fetchViaMacRelay(targetUrl, timeoutMs = 2800) {
+    return new Promise((resolve) => {
+        if (!ACTIVE_ALIGNER_HOST) return resolve(null);
+        const relayPath = `/api/fast_fetch?url=${encodeURIComponent(targetUrl)}`;
+        let done = false;
+        let req = null;
+        const t = setTimeout(() => {
+            if (!done) { done = true; try { if (req) req.abort(); } catch(e) {} resolve(null); }
+        }, timeoutMs);
+        try {
+            req = http.get({ hostname: ACTIVE_ALIGNER_HOST, port: 9097, path: relayPath, timeout: timeoutMs }, (res) => {
+                if (res.statusCode !== 200) { clearTimeout(t); res.resume(); if (!done) { done = true; resolve(null); } return; }
+                let body = '';
+                res.setEncoding('utf8');
+                res.on('data', c => { body += c; });
+                res.on('end', () => { clearTimeout(t); if (!done) { done = true; resolve(body); } });
+            });
+            req.on('error', () => { clearTimeout(t); if (!done) { done = true; resolve(null); } });
+        } catch (e) {
+            clearTimeout(t);
+            if (!done) { done = true; resolve(null); }
+        }
+    });
+}
+
 async function getAnimeDetails(slug) {
     if (!slug) return { slug: '', title: '', synopsis: '', episodes_count: 12 };
 
@@ -542,7 +594,8 @@ async function getAnimeDetails(slug) {
 
     try {
         const detailUrl = `https://jkanime.net/${normalizedSlug}/`;
-        const html = await fetchText(detailUrl);
+        let html = await fetchViaMacRelay(detailUrl, 2800);
+        if (!html) html = await fetchText(detailUrl);
 
         // 1. Title
         const tm = html.match(/<meta property=["']og:title["']\s+content=["'](.*?)["']/);
@@ -608,28 +661,49 @@ async function getAnimeDetails(slug) {
 }
 
 const TMDB_OFFICIAL_KEY = '15d2ea6d0dc1d476efbca3eba2b9bbfb';
+const TMDB_META_CACHE = new Map();
 
-function fetchHttpsJsonRaw(hostname, fullPath, timeoutMs = 6000) {
+function fetchHttpsJsonRaw(hostname, fullPath, timeoutMs = 3800) {
     return new Promise((resolve, reject) => {
+        let settled = false;
+        let req = null;
+        const hardTimer = setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                try { if (req) req.abort(); } catch (e) {}
+                reject(new Error('TMDB Hard Timeout: ' + hostname));
+            }
+        }, timeoutMs);
         const opts = {
             hostname: hostname,
             port: 443,
             path: fullPath,
             method: 'GET',
+            family: 4,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15',
                 'Accept': 'application/json'
             },
             timeout: timeoutMs
         };
-        const req = https.request(opts, (res) => {
+        req = https.request(opts, (res) => {
             let data = '';
             res.setEncoding('utf8');
             res.on('data', chunk => { data += chunk; });
-            res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+            res.on('end', () => {
+                clearTimeout(hardTimer);
+                if (!settled) { settled = true; resolve({ statusCode: res.statusCode, body: data }); }
+            });
         });
-        req.on('error', reject);
-        req.on('timeout', () => { req.abort(); reject(new Error('TMDB Request Timeout: ' + hostname)); });
+        req.on('error', (err) => {
+            clearTimeout(hardTimer);
+            if (!settled) { settled = true; reject(err); }
+        });
+        req.on('timeout', () => {
+            clearTimeout(hardTimer);
+            try { req.abort(); } catch (e) {}
+            if (!settled) { settled = true; reject(new Error('TMDB Request Timeout: ' + hostname)); }
+        });
         req.end();
     });
 }
@@ -639,18 +713,48 @@ async function proxyTmdbRequest(subpath, queryStr) {
     if (!finalQuery.includes('language=')) {
         finalQuery += (finalQuery ? '&' : '') + 'language=es-MX';
     }
-    // 1. Fuente Primaria en Tiempo Real: API Oficial de TMDB (0 retraso de caché en estrenos/nuevas temporadas)
+    const cacheKey = `${subpath}?${finalQuery}`;
+    const now = Date.now();
+    const cached = TMDB_META_CACHE.get(cacheKey);
+    if (cached && (now - cached.ts < 1800000)) {
+        return cached.res;
+    }
+
+    // 0. Aceleración M3 Relay (< 1s) si el Mac está en línea
+    const officialUrl = `https://api.themoviedb.org/3/${subpath}?api_key=${TMDB_OFFICIAL_KEY}&${finalQuery}`;
+    try {
+        const relayBody = await fetchViaMacRelay(officialUrl, 2600);
+        if (relayBody && relayBody.length > 2) {
+            const relayRes = { statusCode: 200, body: relayBody };
+            if (TMDB_META_CACHE.size > 250) TMDB_META_CACHE.delete(TMDB_META_CACHE.keys().next().value);
+            TMDB_META_CACHE.set(cacheKey, { res: relayRes, ts: now });
+            return relayRes;
+        }
+    } catch (eRelay) {}
+
+    // 1. Fuente Primaria en Tiempo Real: API Oficial de TMDB (timeout rápido 3.0s)
     try {
         const officialQuery = `api_key=${TMDB_OFFICIAL_KEY}&${finalQuery}`;
-        const primaryRes = await fetchHttpsJsonRaw('api.themoviedb.org', `/3/${subpath}?${officialQuery}`, 5500);
+        const primaryRes = await fetchHttpsJsonRaw('api.themoviedb.org', `/3/${subpath}?${officialQuery}`, 3000);
         if (primaryRes && primaryRes.statusCode === 200 && primaryRes.body && primaryRes.body.length > 2) {
+            if (TMDB_META_CACHE.size > 250) {
+                TMDB_META_CACHE.delete(TMDB_META_CACHE.keys().next().value);
+            }
+            TMDB_META_CACHE.set(cacheKey, { res: primaryRes, ts: now });
             return primaryRes;
         }
     } catch (ePrimary) {
         console.warn(`[TMDB_PRIMARY] Fallback a espejo para ${subpath}: ${ePrimary.message}`);
     }
     // 2. Espejo de Respaldo: nabby.pro
-    return fetchHttpsJsonRaw('nabby.pro', `/api/tmdb/${subpath}?${finalQuery}`, 7500);
+    const mirrorRes = await fetchHttpsJsonRaw('nabby.pro', `/api/tmdb/${subpath}?${finalQuery}`, 4500);
+    if (mirrorRes && mirrorRes.statusCode === 200 && mirrorRes.body && mirrorRes.body.length > 2) {
+        if (TMDB_META_CACHE.size > 250) {
+            TMDB_META_CACHE.delete(TMDB_META_CACHE.keys().next().value);
+        }
+        TMDB_META_CACHE.set(cacheKey, { res: mirrorRes, ts: now });
+    }
+    return mirrorRes;
 }
 
 const TMDB_STREAM_CACHE = new Map();
@@ -2001,11 +2105,15 @@ async function resolveTmdbStream(id, type = 'movie', s = 1, e = 1, reqHost = '12
     console.log(`[MULTI_CLUSTER_RESOLVER] Consultando Cuevana3c, Gnula, Torrents y 4 Clusters Framex para ${id} (${type} S${s}E${e}) con títulos:`, titles, `año:`, yearTarget, `origLang:`, resolvedOrigLang);
 
     try {
+        const withTimeout = (p, ms) => Promise.race([
+            Promise.resolve(p),
+            new Promise(res => setTimeout(() => res([]), ms))
+        ]);
         const triResults = await safeAll([
-            resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
-            resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang),
-            resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto),
-            resolveTmdbTorrents(id, type, s, e, reqHost, reqProto, preferSpanish)
+            withTimeout(resolveCuevanaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang), 7500),
+            withTimeout(resolveGnulaStreams(id, type, s, e, titles, yearTarget, resolvedOrigLang), 7500),
+            withTimeout(resolveFramexStreams(id, type, s, e, resolvedOrigLang, reqHost, reqProto), 7500),
+            withTimeout(resolveTmdbTorrents(id, type, s, e, reqHost, reqProto, preferSpanish), 7500)
         ]);
 
         const framexCands = triResults[2] || [];
