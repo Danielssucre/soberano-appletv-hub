@@ -12063,9 +12063,14 @@
                 }
 
                 const reqTrack = (targetTrackIdx !== null && targetTrackIdx !== undefined) ? targetTrackIdx : 0;
+                let detectedHash = (currentTmdbPlaying && currentTmdbPlaying.hash) ? String(currentTmdbPlaying.hash).toLowerCase() : '';
+                if (!detectedHash && tmdbDirectStreamUrl) {
+                    const mHash = tmdbDirectStreamUrl.match(/[?&]hash=([a-f0-9]{40})/i) || tmdbDirectStreamUrl.match(/\/hls\/([a-f0-9]{40})\//i);
+                    if (mHash && mHash[1]) detectedHash = mHash[1].toLowerCase();
+                }
                 let hashParam = '';
-                if (currentTmdbPlaying && currentTmdbPlaying.server === 'torrent_p2p' && currentTmdbPlaying.hash) {
-                    hashParam = `&hash=${encodeURIComponent(currentTmdbPlaying.hash)}`;
+                if (detectedHash && /^[a-f0-9]{40}$/.test(detectedHash)) {
+                    hashParam = `&hash=${encodeURIComponent(detectedHash)}`;
                 }
 
                 // 1. Consultar API unificada /api/subtitles/auto del servidor Soberano
@@ -12079,7 +12084,7 @@
                         const data = await resp.json();
                         if (data && data.status === 'ok' && data.vtt_content) {
                             const parsed = parseVTT(data.vtt_content);
-                            if (parsed && parsed.length >= 3) {
+                            if (parsed && parsed.length >= 1) {
                                 currentSubCues = parsed;
                                 if (currentSubSyncOffset !== 0.0) {
                                     currentSubCues.forEach(c => {
@@ -12092,12 +12097,46 @@
                                 }
                                 currentSpanishSubIndex = typeof data.selected_index === 'number' ? data.selected_index : 0;
                                 currentCustomSub = data.vtt_url || null;
+                                window._activeSubIsEmbeddedMkv = !!(data.label && data.label.indexOf('Embebido') !== -1);
                                 subtitlesEnabled = true;
                                 setUserSubtitlePreference(true);
                                 attachNativeSpanishTrack(data.vtt_content, data.vtt_url);
                                 updateSubButtonsUI('on');
                                 renderActiveSubCueNow();
                                 showToast(`✅ Subtítulo Español anclado: ${data.label || 'Español'} (${parsed.length} líneas)`);
+                                if (data.is_growing_embedded && detectedHash) {
+                                    if (window._growingSubPollTimer) clearInterval(window._growingSubPollTimer);
+                                    window._growingSubPollTimer = setInterval(async () => {
+                                        if (!subtitlesEnabled || !currentTmdbPlaying) {
+                                            clearInterval(window._growingSubPollTimer);
+                                            window._growingSubPollTimer = null;
+                                            return;
+                                        }
+                                        try {
+                                            const rGrow = await fetch(qUrl, { cache: 'no-store' });
+                                            if (rGrow.ok) {
+                                                const dGrow = await rGrow.json();
+                                                if (dGrow && dGrow.status === 'ok' && dGrow.vtt_content) {
+                                                    const pGrow = parseVTT(dGrow.vtt_content);
+                                                    if (pGrow && pGrow.length > currentSubCues.length) {
+                                                        if (currentSubSyncOffset !== 0.0) {
+                                                            pGrow.forEach(c => {
+                                                                c.start = Math.max(0, c.rawStart + currentSubSyncOffset);
+                                                                c.end = Math.max(0, c.rawEnd + currentSubSyncOffset);
+                                                            });
+                                                        }
+                                                        currentSubCues = pGrow;
+                                                        renderActiveSubCueNow();
+                                                    }
+                                                    if (!dGrow.is_growing_embedded) {
+                                                        clearInterval(window._growingSubPollTimer);
+                                                        window._growingSubPollTimer = null;
+                                                    }
+                                                }
+                                            }
+                                        } catch (eG) {}
+                                    }, 4000);
+                                }
                                 isSearchingAutoSub = false;
                                 return true;
                             }
@@ -12670,7 +12709,7 @@
                     hlsPlayer = null;
                 }
                 hlsPlayer = new Hls({
-                    startPosition: startTime > 0 ? startTime : -1,
+                    startPosition: startTime > 0 ? startTime : 0,
                     maxBufferLength: 30,
                     maxMaxBufferLength: 60,
                     maxBufferSize: 16 * 1024 * 1024,
@@ -12682,8 +12721,19 @@
                     enableWorker: false,
                     progressive: true
                 });
+                try {
+                    Object.defineProperty(hlsPlayer, 'liveSyncPosition', {
+                        get: () => null,
+                        configurable: true
+                    });
+                } catch (eLs) {}
                 hlsPlayer.loadSource(targetUrl);
                 hlsPlayer.attachMedia(video);
+                hlsPlayer.on(Hls.Events.LEVEL_LOADED, (event, data) => {
+                    if (data && data.details && !data.details.endList) {
+                        data.details.startTimeOffset = startTime > 0 ? startTime : 0;
+                    }
+                });
                 hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
                     clearTimeout(playbackWatchdog);
                     if (startTime > 0) {
@@ -12692,6 +12742,18 @@
                     video.play().catch(e => console.log('HLS play waiting for interaction:', e));
                 });
                 hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
+                    if (!data.fatal) {
+                        if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+                            console.warn(`[HLS PLAYER] bufferStalledError en [${cleanName}], reactivando flujo...`);
+                            if (hlsPlayer) {
+                                try { hlsPlayer.startLoad(); } catch (eS) {}
+                            }
+                            if (video && video.paused && isPlaying) {
+                                video.play().catch(() => {});
+                            }
+                        }
+                        return;
+                    }
                     if (data.fatal) {
                         const resumePos = (video && video.currentTime > 2) ? video.currentTime : (startTime || 0);
                         console.warn(`[HLS ERROR] Fatal en servidor [${cleanName}] pos ${resumePos.toFixed(1)}s: type=${data.type}, details=${data.details}`);
@@ -15263,9 +15325,9 @@
                 if (btnPlay && typeof SpatialNav !== 'undefined') SpatialNav.focusElement(btnPlay);
             }, 100);
             startStatsPolling();
-
-            if (wantSubs && !customSub) {
-                autoSearchAndAnchorSpanishSub(0);
+            if (window._growingSubPollTimer) {
+                clearInterval(window._growingSubPollTimer);
+                window._growingSubPollTimer = null;
             }
 
             // Actualizar botones de servidor en el reproductor
@@ -15380,10 +15442,19 @@
                 }
 
                 // SOBERANO SUBTITLES ENGINE:
-                // Si el usuario tiene activa la preferencia de subtítulos, mantenerla; si no, mantener desactivado.
+                // Si el stream no tiene audio español doblado (!audio_es), o el usuario tiene activa la preferencia de subtítulos,
+                // activar y anclar subtítulos en español automáticamente (priorizando subtítulo oficial embebido en el MKV).
+                const firstSrv = (directServersQueue && directServersQueue[0]) ? directServersQueue[0] : null;
+                const mHashUrl = tmdbDirectStreamUrl.match(/[?&]hash=([a-f0-9]{40})/i) || tmdbDirectStreamUrl.match(/\/hls\/([a-f0-9]{40})\//i);
+                if (mHashUrl && mHashUrl[1] && currentTmdbPlaying) {
+                    currentTmdbPlaying.hash = mHashUrl[1].toLowerCase();
+                }
+                const needsSubsForOrigAudio = !!(firstSrv && !firstSrv.audio_es);
+                const effectiveWantSubs = wantSubs || needsSubsForOrigAudio;
+
                 Array.from(video.querySelectorAll('track')).forEach(t => t.remove());
                 currentSubCues = [];
-                subtitlesEnabled = wantSubs;
+                subtitlesEnabled = effectiveWantSubs;
                 
                 // Recuperar ajuste manual guardado
                 let savedOffset = 0.0;
@@ -15396,12 +15467,12 @@
                 if (badge) badge.textContent = (currentSubSyncOffset >= 0 ? '+' : '') + currentSubSyncOffset.toFixed(1) + 's';
 
                 const subOverlayEl = document.getElementById('soberanoSubOverlay');
-                if (subOverlayEl && !wantSubs) {
+                if (subOverlayEl && !effectiveWantSubs) {
                     subOverlayEl.style.display = 'none';
                     subOverlayEl.removeAttribute('data-active-text');
                     subOverlayEl.innerHTML = '';
                 }
-                updateSubButtonsUI(wantSubs ? 'loading' : 'off');
+                updateSubButtonsUI(effectiveWantSubs ? 'loading' : 'off');
 
                 // Si el usuario subió manualmente un archivo propio antes de reproducir, anclarlo
                 if (window.isUserUploadedSub && customSub) {
@@ -15421,7 +15492,11 @@
                         .catch(() => {});
                 }
 
+                window._activeSubIsEmbeddedMkv = false;
                 executeTmdbDirectPlayback(0, 0);
+                if (effectiveWantSubs && !customSub && !(currentTmdbPlaying && currentTmdbPlaying.hash)) {
+                    autoSearchAndAnchorSpanishSub(0);
+                }
                 return;
             }
 
@@ -15568,6 +15643,16 @@
             tmdbDirectStreamUrl = currentSrv.url;
             lastRawBaseHlsUrl = currentSrv.url;
             serverMode = 'native';
+            if (currentTmdbPlaying && tmdbDirectStreamUrl) {
+                const mSrvHash = tmdbDirectStreamUrl.match(/[?&]hash=([a-f0-9]{40})/i) || tmdbDirectStreamUrl.match(/\/hls\/([a-f0-9]{40})\//i);
+                const newSrvHash = (mSrvHash && mSrvHash[1]) ? mSrvHash[1].toLowerCase() : '';
+                if (newSrvHash && currentTmdbPlaying.hash !== newSrvHash) {
+                    currentTmdbPlaying.hash = newSrvHash;
+                    if (!currentSrv.audio_es || subtitlesEnabled) {
+                        setTimeout(() => autoSearchAndAnchorSpanishSub(0), 600);
+                    }
+                }
+            }
 
             const cleanName = (currentSrv.name || 'Stream Nativo')
                 .replace(/^Framex\s*/i, '')
@@ -15648,16 +15733,23 @@
                         renderTextTracksNatively: false
                     });
                     try {
+                        Object.defineProperty(hlsPlayer, 'liveSyncPosition', {
+                            get: () => null,
+                            configurable: true
+                        });
+                    } catch (eLs) {}
+                    try {
                         video.removeAttribute('src');
                         video.load();
                     } catch(e) {}
                     hlsPlayer.loadSource(tmdbDirectStreamUrl);
                     hlsPlayer.attachMedia(video);
                     hlsPlayer.on(Hls.Events.LEVEL_LOADED, (event, data) => {
-                        if (data && data.details) {
-                            // En transcodificaciones progresivas de video (event playlist), forzar live=false
-                            // para que Hls.js NUNCA adelante la reproducción hacia el borde del buffer
-                            data.details.live = false;
+                        if (data && data.details && !data.details.endList) {
+                            // En transcodificaciones progresivas de video (event playlist), mantener details.live=true
+                            // para que Hls.js recargue index.m3u8 cada 3s sin detenerse, pero anclar startTimeOffset=0
+                            // y liveSyncPosition=null para que jamás salte al borde en directo.
+                            data.details.startTimeOffset = startTime > 0 ? startTime : 0;
                         }
                     });
                     hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -15666,6 +15758,13 @@
                         enforceSpanishTracks(video);
                         if (startTime > 0) video.currentTime = startTime;
                         video.play().catch(e => console.log('HLS play wait:', e));
+                        if (currentTmdbPlaying && currentTmdbPlaying.hash && (subtitlesEnabled || (currentSrv && !currentSrv.audio_es))) {
+                            setTimeout(() => {
+                                if (!isSearchingAutoSub && (!currentSubCues || currentSubCues.length === 0 || !window._activeSubIsEmbeddedMkv)) {
+                                    autoSearchAndAnchorSpanishSub(0);
+                                }
+                            }, 250);
+                        }
                     });
                     hlsPlayer.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
                         if (hlsPlayer) {
@@ -15678,9 +15777,11 @@
                         if (!data.fatal) {
                             if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
                                 console.warn(`[TMDB PLAYER] HLS bufferStalledError en [${cleanName}], verificando carga de fragmentos...`);
-                                if (hlsPlayer && hlsPlayer.levelController && !hlsPlayer.levelController.canLoad) {
-                                    console.log('[TMDB PLAYER] Recuperando carga activa tras bufferStalledError');
-                                    hlsPlayer.startLoad();
+                                if (hlsPlayer) {
+                                    try { hlsPlayer.startLoad(); } catch (eSl) {}
+                                }
+                                if (video && video.paused && isPlaying) {
+                                    video.play().catch(() => {});
                                 }
                             }
                             return;

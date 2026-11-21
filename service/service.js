@@ -794,6 +794,44 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
     const title = String(params.title || "").trim();
     const slug = String(params.slug || "").trim();
     const requestedTrack = Math.max(0, parseInt(params.track || 0, 10) || 0);
+    const reqTorrentHash = String(params.hash || params.infoHash || "").toLowerCase().trim();
+
+    // 0A. PRIORIDAD SUPREMA EN TORRENTS MKV: Si el torrent activo tiene subtítulos oficiales en español embebidos en el MKV,
+    // extraerlos directamente del flujo demuxed del Mac M3 Daemon para garantizar 100% de exactitud de episodio y sincronía al milisegundo.
+    if (reqTorrentHash && /^[a-f0-9]{40}$/.test(reqTorrentHash) && requestedTrack === 0) {
+        try {
+            const liveDaemonHost = await getLiveAlignerHost();
+            const embSubRes = await fetchJson(`http://${liveDaemonHost}:9097/api/torrent/subtitles?hash=${encodeURIComponent(reqTorrentHash)}`, {}, 5000);
+            if (embSubRes && embSubRes.status === "ok" && embSubRes.has_embedded_es && embSubRes.vtt_content && embSubRes.vtt_content.indexOf("-->") !== -1) {
+                let hlsReadyVtt = convertSrtToWebVtt(embSubRes.vtt_content);
+                if (!hlsReadyVtt.includes("X-TIMESTAMP-MAP")) {
+                    hlsReadyVtt = hlsReadyVtt.replace(/^WEBVTT[^\n]*\n/, "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n");
+                }
+                const hashFileName = `${reqTorrentHash}_es.vtt`;
+                try {
+                    if (!fs.existsSync(SUBTITLES_DIR)) fs.mkdirSync(SUBTITLES_DIR);
+                    fs.writeFileSync(path.join(SUBTITLES_DIR, hashFileName), hlsReadyVtt, "utf8");
+                    fs.writeFileSync(path.join(SUBTITLES_DIR, "active_es.vtt"), hlsReadyVtt, "utf8");
+                } catch (eWriteEmb) {}
+                const embVttUrl = `${reqProto}://${reqHost}/subtitles/${hashFileName}`;
+                const embLabel = embSubRes.label || "🎯 Español Oficial Embebido (MKV)";
+                return {
+                    status: "ok",
+                    tmdb_id: tmdbId,
+                    imdb_id: imdbId,
+                    selected_index: 0,
+                    total_tracks: 1,
+                    label: embLabel,
+                    is_growing_embedded: !!embSubRes.is_growing,
+                    vtt_url: embVttUrl,
+                    vtt_content: hlsReadyVtt,
+                    tracks: [{ index: 0, label: embLabel, url: embVttUrl }]
+                };
+            }
+        } catch (eEmb) {
+            console.warn("[AUTO_SUB] Aviso consultando subtítulo embebido MKV en daemon:", eEmb.message);
+        }
+    }
 
     // 0. Verificar si es Ninku o si hay subtítulo local pre-sincronizado en disco
     if (slug === "ninku" || title.toLowerCase().includes("ninku")) {
@@ -1824,15 +1862,27 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http', p
 
         const cands = [];
         for (const str of tData.streams) {
+            const rawLines = `${str.name || ''}\n${str.title || ''}`.split('\n');
+            // Excluir líneas de banderas de subtítulos múltiples (ej. "Multi Subs / 🇷🇺 / 🇮🇹 / 🇪🇸 / 🇲🇽")
+            // para jamás confundir subtítulos embebidos con audio doblado al español.
+            const audioEvalLines = rawLines.filter(ln => {
+                if (/\b(multi[- ]?subs?|multisub|subtitles?|subs?)\b/i.test(ln)) return false;
+                const flagMatches = ln.match(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/g);
+                if (flagMatches && flagMatches.length >= 3 && !/\b(dual|multi[\s-]*audio)\b/i.test(ln)) return false;
+                return true;
+            });
+            const audioCombined = audioEvalLines.join(' ').toLowerCase();
             const combined = `${str.name || ''} ${str.title || ''}`.toLowerCase();
-            let isSpanish = false;
-            if (/\b(castellano|español|espanol|latino|spanish)\b/.test(combined)) isSpanish = true;
-            else if (combined.includes('🇪🇸') || combined.includes('🇲🇽')) isSpanish = true;
-            else if (/[\/\[\.\-_\s](es|spa|esp)[\/\]\.\-_\s]/.test(combined)) isSpanish = true;
-            else if (/\b(audio latino|audio castellano|audio espanol|audio español|dual audio)\b/.test(combined)) isSpanish = true;
+            const hasMultiSubTag = /\b(multi[- ]?subs?|multisub)\b/i.test(combined) || /🇪🇸|🇲🇽/.test(combined);
 
-            // Si el filtro de español estricto está activo, solo incluir fuentes en español
-            if (preferSpanish && !isSpanish) continue;
+            let isSpanish = false;
+            if (/\b(castellano|español|espanol|latino|spanish)\b/.test(audioCombined)) isSpanish = true;
+            else if (audioCombined.includes('🇪🇸') || audioCombined.includes('🇲🇽')) isSpanish = true;
+            else if (/[\/\[\.\-_\s](es|spa|esp)[\/\]\.\-_\s]/.test(audioCombined)) isSpanish = true;
+            else if (/\b(audio latino|audio castellano|audio espanol|audio español|dual audio)\b/.test(audioCombined)) isSpanish = true;
+
+            // Si el filtro de español estricto está activo, solo incluir fuentes con audio español o subtítulos españoles embebidos
+            if (preferSpanish && !isSpanish && !hasMultiSubTag) continue;
 
             if (str.infoHash) {
                 const seedM = combined.match(/👤\s*(\d+)/);
@@ -1843,7 +1893,7 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http', p
                 const firstLine = (str.title || '').split('\n')[0].replace(/[^\w\s\.\-\[\]\(\)]/g, ' ').slice(0, 32).trim();
                 const fileIdx = str.fileIdx !== undefined ? str.fileIdx : 0;
 
-                const playUrl = `${reqProto}://${reqHost}/api/soberano/play_stream?hash=${encodeURIComponent(str.infoHash)}&idx=${fileIdx}&name=${encodeURIComponent(firstLine)}&type=${type}&s=${s}&e=${e}&is_es=${isSpanish ? '1' : '0'}&stream.m3u8`;
+                const playUrl = `${reqProto}://${reqHost}/api/soberano/play_stream?id=${encodeURIComponent(id)}&hash=${encodeURIComponent(str.infoHash)}&idx=${fileIdx}&name=${encodeURIComponent(firstLine)}&type=${type}&s=${s}&e=${e}&is_es=${isSpanish ? '1' : '0'}&stream.m3u8`;
 
                 cands.push({
                     status: 'ok',
@@ -1851,16 +1901,18 @@ async function resolveTmdbTorrents(id, type, s, e, reqHost, reqProto = 'http', p
                     type: type,
                     season: String(s),
                     episode: String(e),
+                    infoHash: str.infoHash.toLowerCase(),
                     direct_stream_url: playUrl,
                     server: `Torrent Swarm • ${firstLine} (${quality}) [${seeds}s]`,
                     is_sub: !isSpanish,
                     quality: quality,
                     format: 'hls',
                     audio_es: isSpanish,
+                    has_embedded_sub_es: hasMultiSubTag,
                     sub_es: null,
                     subtitles: [],
                     seeds: seeds,
-                    base_bonus: isSpanish ? (300 + Math.min(seeds * 2, 200)) : (40 + Math.min(seeds * 2, 160))
+                    base_bonus: isSpanish ? (300 + Math.min(seeds * 2, 200)) : ((hasMultiSubTag ? 90 : 40) + Math.min(seeds * 2, 160))
                 });
             }
         }
@@ -2442,8 +2494,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (parsed.pathname === '/api/soberano/play_stream') {
+        const id = parsed.query.id || parsed.query.imdb_id || '';
         const infoHash = (parsed.query.hash || parsed.query.infoHash || '').toLowerCase().trim();
         const fileIdx = parseInt(parsed.query.idx || parsed.query.fileIdx || 0, 10);
+        const type = parsed.query.type || 'tv';
+        const s = parseInt(parsed.query.s || parsed.query.season || 1, 10) || 1;
+        const e = parseInt(parsed.query.e || parsed.query.episode || 1, 10) || 1;
         const title = parsed.query.name || parsed.query.title || 'video';
         const isEs = parsed.query.is_es === '1' || parsed.query.is_es === 'true';
 
@@ -2459,6 +2515,8 @@ const server = http.createServer(async (req, res) => {
             if (daemonRes && daemonRes.status === 'ok') {
                 const cleanHash = (daemonRes.infoHash || infoHash).toLowerCase();
                 if (daemonRes.burned) BURNED_HASHES[cleanHash] = true; else delete BURNED_HASHES[cleanHash];
+                // Pre-calentar en background el subtítulo específico de este hash (priorizando MKV embebido)
+                resolveAutoSpanishSubtitle({ id: id, type: type, s: s, e: e, title: title, hash: cleanHash }, reqHost, reqProto).catch(() => {});
                 const targetM3u8 = `${reqProto}://${reqHost}/api/torrent/hls/${cleanHash}/index.m3u8`;
                 res.writeHead(302, {
                     'Location': targetM3u8,
@@ -2571,10 +2629,12 @@ const server = http.createServer(async (req, res) => {
             const relFile = match[2].split('?')[0];
 
             // 1. Multivariant Master Playlist nativo (#EXT-X-MEDIA:TYPE=SUBTITLES)
-            // Garantiza que AirPlay 2 y el receptor del televisor LG carguen video y subtítulos
-            // de forma nativa e inseparable sin recurrir a sideloading DOM en el móvil.
+            // En webOS TV (Hls.js), los subtítulos se pintan en el overlay DOM #soberanoSubOverlay,
+            // por lo que omitimos sub.m3u8 del Master Playlist para evitar contienda de conexiones MSE.
             if (relFile === 'index.m3u8') {
-                const burnedMaster = !!BURNED_HASHES[infoHash];
+                const reqUa = String((req.headers && req.headers['user-agent']) || '');
+                const isWebOsTv = /Web0S|WebOS|SmartTV|LG Browser/i.test(reqUa);
+                const burnedMaster = !!BURNED_HASHES[infoHash] || isWebOsTv;
                 const masterLines = burnedMaster ? [
                     '#EXTM3U',
                     '#EXT-X-VERSION:6',
@@ -2586,7 +2646,7 @@ const server = http.createServer(async (req, res) => {
                     '#EXTM3U',
                     '#EXT-X-VERSION:6',
                     '#EXT-X-INDEPENDENT-SEGMENTS',
-                    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=YES,CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog",URI="sub.m3u8"',
+                    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",LANGUAGE="es",NAME="Español",DEFAULT=YES,AUTOSELECT=YES,FORCED=NO,CHARACTERISTICS="public.accessibility.transcribes-spoken-dialog",URI="sub.m3u8"',
                     '#EXT-X-STREAM-INF:BANDWIDTH=5500000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",SUBTITLES="subs"',
                     'video.m3u8',
                     ''
@@ -2647,27 +2707,17 @@ const server = http.createServer(async (req, res) => {
                 }
             }
 
-            // 3. Segmentos WebVTT alineados al fotograma con cabecera X-TIMESTAMP-MAP
+            // 3. Segmentos WebVTT alineados al fotograma con cabecera X-TIMESTAMP-MAP (sin bloqueos ni contaminación cruzada)
             if (relFile === 'sub_seg.vtt') {
-                const segIdx = parseInt(parsed.query.seg || '0', 10);
                 const dur = parseFloat(parsed.query.dur || '4.0');
                 const cumStart = parseFloat(parsed.query.cum || '0.0');
                 const cumEnd = cumStart + dur;
 
-                // Esperar (máx 4s) al archivo del propio torrent en los primeros segmentos: evita servir
-                // segmentos vacíos o subtítulos de un título anterior (active_es.vtt obsoleto).
                 const hashVtt = path.join(SUBTITLES_DIR, infoHash + '_es.vtt');
-                if (!fs.existsSync(hashVtt) && segIdx <= 3) {
-                    const waitStart = Date.now();
-                    while (!fs.existsSync(hashVtt) && Date.now() - waitStart < 4000) {
-                        await new Promise(function(resolve) { setTimeout(resolve, 100); });
-                    }
-                }
-                let localDiskPath = fs.existsSync(hashVtt) ? hashVtt : path.join(SUBTITLES_DIR, 'active_es.vtt');
                 let matchedCues = [];
-                if (fs.existsSync(localDiskPath)) {
+                if (fs.existsSync(hashVtt)) {
                     try {
-                        const content = fs.readFileSync(localDiskPath, 'utf8');
+                        const content = fs.readFileSync(hashVtt, 'utf8');
                         const cues = parseVttForHls(content);
                         matchedCues = cues.filter(c => c.end >= cumStart && c.start < cumEnd);
                     } catch (eC) {}
@@ -3467,9 +3517,9 @@ const server = http.createServer(async (req, res) => {
 
             CURRENT_PLAYLIST_SEGMENTS = segUrls;
 
-            // Pre-warm initial 4 segments into RAM immediately upon manifest request!
+            // Pre-warm initial 2 segments into RAM immediately upon manifest request!
             if (segUrls.length > 0) {
-                for (let i = 0; i < Math.min(4, segUrls.length); i++) {
+                for (let i = 0; i < Math.min(2, segUrls.length); i++) {
                     getOrFetchSegment(segUrls[i]).catch(() => {});
                 }
             }
@@ -3495,7 +3545,7 @@ const server = http.createServer(async (req, res) => {
 
         try {
             const { buf, fromCache } = await getOrFetchSegment(segUrl);
-            triggerPrefetchNext(segUrl, 5);
+            triggerPrefetchNext(segUrl, 2);
 
             res.writeHead(200, {
                 'Content-Type': segUrl.includes('.mp4') ? 'video/mp4' : 'video/mp2t',
