@@ -891,21 +891,30 @@ async function translateCueListWithGtx(cues) {
     for (let i = 0; i < Math.min(cues.length, 2500); i += batchSize) {
         batches.push(cues.slice(i, i + batchSize));
     }
-    // Ejecutar traducción en ventanas de 10 lotes paralelos para traducir películas largas (2h-3h) completas sin saturar GTX
-    for (let w = 0; w < batches.length; w += 10) {
-        const win = batches.slice(w, w + 10);
+    // Ejecutar traducción en ventanas de 3 lotes paralelos para evitar throttling/saturación WiFi del TV
+    for (let w = 0; w < batches.length; w += 3) {
+        const win = batches.slice(w, w + 3);
         await safeAll(win.map(async (batch) => {
-            try {
-                const joined = batch.map(c => c.text).join('\n');
-                const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
-                const gRaw = await fetchText(gUrl, {}, 4500);
-                const gJson = JSON.parse(gRaw);
-                const fullTrans = (gJson[0] || []).map(x => (x && x[0]) ? x[0] : '').join('');
-                const transLines = fullTrans.split('\n');
-                for (let j = 0; j < batch.length; j++) {
-                    if (transLines[j]) batch[j].text = transLines[j].trim();
-                }
-            } catch(eTrans) {}
+            const joined = batch.map(c => c.text).join('\n');
+            const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
+            for (let attempt = 0; attempt <= 1; attempt++) {
+                try {
+                    const gRaw = await fetchText(gUrl, {}, 9000);
+                    const gJson = JSON.parse(gRaw);
+                    if (!gJson || !Array.isArray(gJson[0])) continue;
+                    const fullTrans = gJson[0].map(x => (x && x[0]) ? x[0] : '').join('');
+                    if (!fullTrans || !fullTrans.trim()) continue;
+                    const transLines = fullTrans.split('\n');
+                    for (let j = 0; j < batch.length; j++) {
+                        const tLine = transLines[j] ? transLines[j].trim() : '';
+                        if (tLine) {
+                            batch[j].text = tLine;
+                            batch[j].__translated = true;
+                        }
+                    }
+                    break;
+                } catch(eTrans) {}
+            }
         }));
     }
 }
@@ -924,7 +933,7 @@ const EMBEDDED_EN_TRANSLATION_CACHE = new Map();
 
 async function translateEmbeddedEnglishVttIncremental(infoHash, rawEnVtt) {
     const cues = parseVttCueBlocks(rawEnVtt);
-    if (cues.length === 0) return 'WEBVTT\n\n';
+    if (cues.length === 0) return { vtt: 'WEBVTT\n\n', hasUntranslated: false };
     let cueMap = EMBEDDED_EN_TRANSLATION_CACHE.get(infoHash);
     if (!cueMap) {
         if (EMBEDDED_EN_TRANSLATION_CACHE.size >= 6) {
@@ -938,22 +947,27 @@ async function translateEmbeddedEnglishVttIncremental(infoHash, rawEnVtt) {
     for (let i = 0; i < cues.length; i++) {
         const key = `${cues[i].ts}|${cues[i].text}`;
         if (!cueMap.has(key)) {
-            missing.push({ key: key, ts: cues[i].ts, text: cues[i].text });
+            missing.push({ key: key, ts: cues[i].ts, text: cues[i].text, __translated: false });
         }
     }
     if (missing.length > 0) {
         await translateCueListWithGtx(missing);
         for (let m = 0; m < missing.length; m++) {
-            cueMap.set(missing[m].key, missing[m].text);
+            if (missing[m].__translated === true) {
+                cueMap.set(missing[m].key, missing[m].text);
+            }
         }
     }
+    let hasUntranslated = false;
     let outVtt = 'WEBVTT\n\n';
     for (let cIdx = 0; cIdx < cues.length; cIdx++) {
         const key = `${cues[cIdx].ts}|${cues[cIdx].text}`;
-        const translated = cueMap.get(key) || cues[cIdx].text;
+        const cachedTrans = cueMap.get(key);
+        if (!cachedTrans) hasUntranslated = true;
+        const translated = cachedTrans || cues[cIdx].text;
         outVtt += `${cues[cIdx].ts}\n${translated}\n\n`;
     }
-    return outVtt;
+    return { vtt: outVtt, hasUntranslated: hasUntranslated };
 }
 
 async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
@@ -995,8 +1009,11 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
             const hasEmbEn = !!(embSubRes && embSubRes.has_embedded_en);
             if (embSubRes && embSubRes.status === "ok" && (hasEmbEs || hasEmbEn) && (embSubRes.is_growing || (embSubRes.vtt_content && embSubRes.vtt_content.indexOf("-->") !== -1))) {
                 let rawVttOut = embSubRes.vtt_content || "WEBVTT\n\n";
+                let hasUntranslatedEmb = false;
                 if (hasEmbEn && !hasEmbEs && rawVttOut.indexOf("-->") !== -1) {
-                    rawVttOut = await translateEmbeddedEnglishVttIncremental(reqTorrentHash, rawVttOut);
+                    const incRes = await translateEmbeddedEnglishVttIncremental(reqTorrentHash, rawVttOut);
+                    rawVttOut = incRes.vtt;
+                    hasUntranslatedEmb = !!incRes.hasUntranslated;
                 }
                 let hlsReadyVtt = convertSrtToWebVtt(rawVttOut);
                 if (!hlsReadyVtt.includes("X-TIMESTAMP-MAP")) {
@@ -1017,7 +1034,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                     selected_index: 0,
                     total_tracks: 2,
                     label: embLabel,
-                    is_growing_embedded: !!embSubRes.is_growing,
+                    is_growing_embedded: !!(embSubRes.is_growing || (hasEmbEn && hasUntranslatedEmb)),
                     vtt_url: embVttUrl,
                     vtt_content: hlsReadyVtt,
                     tracks: [

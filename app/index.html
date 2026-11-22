@@ -12203,7 +12203,16 @@
                                                 const dGrow = await rGrow.json();
                                                 if (dGrow && dGrow.status === 'ok' && dGrow.vtt_content) {
                                                     const pGrow = parseVTT(dGrow.vtt_content);
-                                                    if (pGrow && pGrow.length > currentSubCues.length) {
+                                                    let hasChanges = !!(pGrow && pGrow.length > currentSubCues.length);
+                                                    if (!hasChanges && pGrow && pGrow.length === currentSubCues.length) {
+                                                        for (let ci = 0; ci < pGrow.length; ci++) {
+                                                            if (pGrow[ci].text !== currentSubCues[ci].text) {
+                                                                hasChanges = true;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                    if (pGrow && pGrow.length > 0 && hasChanges) {
                                                         const wasEmpty = currentSubCues.length === 0;
                                                         if (currentSubSyncOffset !== 0.0) {
                                                             pGrow.forEach(c => {
