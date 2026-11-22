@@ -883,22 +883,26 @@ async function translateRawSubToSpanishVtt(rawSub) {
     }
     const batchSize = 35;
     const batches = [];
-    for (let i = 0; i < Math.min(cues.length, 650); i += batchSize) {
+    for (let i = 0; i < Math.min(cues.length, 2500); i += batchSize) {
         batches.push(cues.slice(i, i + batchSize));
     }
-    await safeAll(batches.map(async (batch) => {
-        try {
-            const joined = batch.map(c => c.text).join('\n');
-            const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
-            const gRaw = await fetchText(gUrl, {}, 4500);
-            const gJson = JSON.parse(gRaw);
-            const fullTrans = (gJson[0] || []).map(x => (x && x[0]) ? x[0] : '').join('');
-            const transLines = fullTrans.split('\n');
-            for (let j = 0; j < batch.length; j++) {
-                if (transLines[j]) batch[j].text = transLines[j].trim();
-            }
-        } catch(eTrans) {}
-    }));
+    // Ejecutar traducción en ventanas de 10 lotes paralelos para traducir películas largas (2h-3h) completas sin saturar GTX
+    for (let w = 0; w < batches.length; w += 10) {
+        const win = batches.slice(w, w + 10);
+        await safeAll(win.map(async (batch) => {
+            try {
+                const joined = batch.map(c => c.text).join('\n');
+                const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
+                const gRaw = await fetchText(gUrl, {}, 4500);
+                const gJson = JSON.parse(gRaw);
+                const fullTrans = (gJson[0] || []).map(x => (x && x[0]) ? x[0] : '').join('');
+                const transLines = fullTrans.split('\n');
+                for (let j = 0; j < batch.length; j++) {
+                    if (transLines[j]) batch[j].text = transLines[j].trim();
+                }
+            } catch(eTrans) {}
+        }));
+    }
     let outVtt = 'WEBVTT\n\n';
     for (let cIdx = 0; cIdx < cues.length; cIdx++) {
         outVtt += `${cues[cIdx].ts}\n${cues[cIdx].text}\n\n`;
@@ -3765,22 +3769,25 @@ const server = http.createServer(async (req, res) => {
             // Traducir por lotes de ~35 líneas en paralelo usando GTX ($0 API)
             const batchSize = 35;
             const batches = [];
-            for (let i = 0; i < Math.min(cues.length, 700); i += batchSize) {
+            for (let i = 0; i < Math.min(cues.length, 2500); i += batchSize) {
                 batches.push(cues.slice(i, i + batchSize));
             }
-            await Promise.all(batches.map(async (batch) => {
-                try {
-                    const joined = batch.map(c => c.text).join('\n');
-                    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
-                    const gRaw = await fetchText(gUrl, {}, 4500);
-                    const gJson = JSON.parse(gRaw);
-                    const fullTrans = (gJson[0] || []).map(x => x[0] || '').join('');
-                    const transLines = fullTrans.split('\n');
-                    for (let j = 0; j < batch.length; j++) {
-                        if (transLines[j]) batch[j].text = transLines[j].trim();
-                    }
-                } catch(eTrans) {}
-            }));
+            for (let w = 0; w < batches.length; w += 10) {
+                const win = batches.slice(w, w + 10);
+                await Promise.all(win.map(async (batch) => {
+                    try {
+                        const joined = batch.map(c => c.text).join('\n');
+                        const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=${encodeURIComponent(joined)}`;
+                        const gRaw = await fetchText(gUrl, {}, 4500);
+                        const gJson = JSON.parse(gRaw);
+                        const fullTrans = (gJson[0] || []).map(x => x[0] || '').join('');
+                        const transLines = fullTrans.split('\n');
+                        for (let j = 0; j < batch.length; j++) {
+                            if (transLines[j]) batch[j].text = transLines[j].trim();
+                        }
+                    } catch(eTrans) {}
+                }));
+            }
             let outVtt = 'WEBVTT\n\n';
             for (let c of cues) {
                 outVtt += `${c.ts}\n${c.text}\n\n`;
