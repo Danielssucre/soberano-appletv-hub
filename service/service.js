@@ -863,10 +863,11 @@ function convertSrtToWebVtt(rawSub) {
 const AUTO_SUB_CACHE = new Map();
 
 async function translateRawSubToSpanishVtt(rawSub) {
-    let clean = String(rawSub || '').replace(/^\uFEFF/, '').replace(/\r/g, '')
-        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
-        .replace(/(\d{2}:\d{2}),(\d{3})/g, '$1.$2')
-        .replace(/\{\\[^}]*\}/g, '');
+    return translateEnglishVttToSpanish(rawSub);
+}
+
+function parseVttCueBlocks(rawVtt) {
+    const clean = convertSrtToWebVtt(rawVtt);
     const blocks = clean.split(/\n\n+/);
     const cues = [];
     for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
@@ -881,6 +882,10 @@ async function translateRawSubToSpanishVtt(rawSub) {
             if (txt) cues.push({ ts: tsLine, text: txt });
         }
     }
+    return cues;
+}
+
+async function translateCueListWithGtx(cues) {
     const batchSize = 35;
     const batches = [];
     for (let i = 0; i < Math.min(cues.length, 2500); i += batchSize) {
@@ -903,9 +908,50 @@ async function translateRawSubToSpanishVtt(rawSub) {
             } catch(eTrans) {}
         }));
     }
+}
+
+async function translateEnglishVttToSpanish(rawVtt) {
+    const cues = parseVttCueBlocks(rawVtt);
+    await translateCueListWithGtx(cues);
     let outVtt = 'WEBVTT\n\n';
     for (let cIdx = 0; cIdx < cues.length; cIdx++) {
         outVtt += `${cues[cIdx].ts}\n${cues[cIdx].text}\n\n`;
+    }
+    return outVtt;
+}
+
+const EMBEDDED_EN_TRANSLATION_CACHE = new Map();
+
+async function translateEmbeddedEnglishVttIncremental(infoHash, rawEnVtt) {
+    const cues = parseVttCueBlocks(rawEnVtt);
+    if (cues.length === 0) return 'WEBVTT\n\n';
+    let cueMap = EMBEDDED_EN_TRANSLATION_CACHE.get(infoHash);
+    if (!cueMap) {
+        if (EMBEDDED_EN_TRANSLATION_CACHE.size >= 6) {
+            const oldestKey = EMBEDDED_EN_TRANSLATION_CACHE.keys().next().value;
+            if (oldestKey) EMBEDDED_EN_TRANSLATION_CACHE.delete(oldestKey);
+        }
+        cueMap = new Map();
+        EMBEDDED_EN_TRANSLATION_CACHE.set(infoHash, cueMap);
+    }
+    const missing = [];
+    for (let i = 0; i < cues.length; i++) {
+        const key = `${cues[i].ts}|${cues[i].text}`;
+        if (!cueMap.has(key)) {
+            missing.push({ key: key, ts: cues[i].ts, text: cues[i].text });
+        }
+    }
+    if (missing.length > 0) {
+        await translateCueListWithGtx(missing);
+        for (let m = 0; m < missing.length; m++) {
+            cueMap.set(missing[m].key, missing[m].text);
+        }
+    }
+    let outVtt = 'WEBVTT\n\n';
+    for (let cIdx = 0; cIdx < cues.length; cIdx++) {
+        const key = `${cues[cIdx].ts}|${cues[cIdx].text}`;
+        const translated = cueMap.get(key) || cues[cIdx].text;
+        outVtt += `${cues[cIdx].ts}\n${translated}\n\n`;
     }
     return outVtt;
 }
@@ -939,14 +985,20 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
         }
     }
 
-    // 0A. PRIORIDAD SUPREMA EN TORRENTS MKV: Si el torrent activo tiene subtítulos oficiales en español embebidos en el MKV,
-    // extraerlos directamente del flujo demuxed del Mac M3 Daemon para garantizar 100% de exactitud de episodio y sincronía al milisegundo.
+    // 0A. PRIORIDAD SUPREMA EN TORRENTS MKV: Si el torrent activo tiene subtítulos embebidos en el MKV (español oficial o inglés traducido incrementalmente al español),
+    // extraerlos directamente del flujo demuxed del Mac M3 Daemon para garantizar 100% de exactitud de episodio/edición y sincronía al milisegundo.
     if (reqTorrentHash && /^[a-f0-9]{40}$/.test(reqTorrentHash) && requestedTrack === 0) {
         try {
             const liveDaemonHost = await getLiveAlignerHost();
             const embSubRes = await fetchJson(`http://${liveDaemonHost}:9097/api/torrent/subtitles?hash=${encodeURIComponent(reqTorrentHash)}`, {}, 9500);
-            if (embSubRes && embSubRes.status === "ok" && embSubRes.has_embedded_es && (embSubRes.is_growing || (embSubRes.vtt_content && embSubRes.vtt_content.indexOf("-->") !== -1))) {
-                let hlsReadyVtt = convertSrtToWebVtt(embSubRes.vtt_content || "WEBVTT\n\n");
+            const hasEmbEs = !!(embSubRes && embSubRes.has_embedded_es);
+            const hasEmbEn = !!(embSubRes && embSubRes.has_embedded_en);
+            if (embSubRes && embSubRes.status === "ok" && (hasEmbEs || hasEmbEn) && (embSubRes.is_growing || (embSubRes.vtt_content && embSubRes.vtt_content.indexOf("-->") !== -1))) {
+                let rawVttOut = embSubRes.vtt_content || "WEBVTT\n\n";
+                if (hasEmbEn && !hasEmbEs && rawVttOut.indexOf("-->") !== -1) {
+                    rawVttOut = await translateEmbeddedEnglishVttIncremental(reqTorrentHash, rawVttOut);
+                }
+                let hlsReadyVtt = convertSrtToWebVtt(rawVttOut);
                 if (!hlsReadyVtt.includes("X-TIMESTAMP-MAP")) {
                     hlsReadyVtt = hlsReadyVtt.replace(/^WEBVTT[^\n]*\n/, "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:126000,LOCAL:00:00:00.000\n");
                 }
@@ -957,7 +1009,7 @@ async function resolveAutoSpanishSubtitle(params, reqHost, reqProto = "http") {
                     fs.writeFileSync(path.join(SUBTITLES_DIR, "active_es.vtt"), hlsReadyVtt, "utf8");
                 } catch (eWriteEmb) {}
                 const embVttUrl = `${reqProto}://${reqHost}/subtitles/${hashFileName}`;
-                const embLabel = embSubRes.label || "🎯 Español Oficial Embebido (MKV)";
+                const embLabel = embSubRes.label || (hasEmbEn ? "🎯 Español IA • Embebido MKV (Sincronizado)" : "🎯 Español Oficial Embebido (MKV)");
                 return {
                     status: "ok",
                     tmdb_id: tmdbId,
